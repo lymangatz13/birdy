@@ -1,9 +1,8 @@
 # Birdy
 
-This repository keeps the original Birdy
+Pulse Tag, a two-player robot-versus-ant chase in a voxel bedroom.
 
-- Birdy: https://lymangatz13.github.io/birdy/
-- Pulse Tag: https://lymangatz13.github.io/birdy/pulse-tag/
+Play: https://lymangatz13.github.io/birdy/
 
 ## Pulse Tag
 
@@ -11,16 +10,15 @@ Pulse Tag is a two-player game. Player 1 creates a room and controls the robot; 
 
 It needs no server of its own: the players' browsers connect directly to each other (WebRTC, via PeerJS), and the room creator's browser runs the match. The free public PeerJS service is used only to introduce the two players. If both players are behind strict networks, PeerJS falls back to its public relay servers.
 
-### Run Pulse Tag locally
+### Run locally
 
 ```powershell
-cd pulse-tag
 npm ci
-npm start
+npm run dev
 ```
 
-Open `http://localhost:4173` (or the configured `PORT`) and create a room. An internet connection is still needed to reach the PeerJS service.
+Open the address it prints (usually `http://localhost:5173`) and create a room. An internet connection is still needed to reach the PeerJS service.
 
-### Render (optional)
+### Publish
 
-The repository-root `render.yaml` defines a Node web service with `rootDir: pulse-tag` that serves the same static files. Connect this repository as a Render Blueprint and create the service. Automatic deploys are off by default in the Blueprint.
+Every push to `main` runs the tests, builds the site and publishes it to GitHub Pages (`.github/workflows/deploy.yml`).
