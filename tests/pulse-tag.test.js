@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  createRoomState, joinRoomState, updatePlayer, requestRematch, tick, findPlayer, randomCode, MATCH_MS, CATCHES_TO_WIN,
+  createRoomState, joinRoomState, updatePlayer, requestRematch, respawnAnt, tick, findPlayer, randomCode, MATCH_MS, CATCHES_TO_WIN, ANT_AREA,
 } from '../src/roomlogic.js';
 
 const T0 = 1_000_000;
@@ -111,5 +111,40 @@ describe('pulse tag room rules', () => {
     expect(state.createdAt).toBe(T0);
     expect(state.clock).toBe(T0 + 5000);
     expect(state.daySpeed).toBe(60);
+  });
+  it('the ant moves freely under a resting object, and a resting object does not catch it', () => {
+    const room = started();
+    const laptop = room.objects[0]; // resting on the desk at x 37, z 19.5, 4 x 6
+    let now = T0;
+    room.ant = { x: 34.5, z: 19.5, angle: 0 };
+    for (let i = 0; i < 30; i++) { now += 100; updatePlayer(room, room.players[1], { ant: { x: 37, z: 19.5, angle: 0 } }, now); }
+    expect(room.ant.x).toBeCloseTo(laptop.x);
+    expect(room.ant.z).toBeCloseTo(laptop.z);
+    now += 2000;
+    updatePlayer(room, room.players[0], { robot: { objects: room.objects } }, now);
+    expect(room.score[0]).toBe(0);
+  });
+  it('after a catch the ant respawns at a random spot on the desk, away from the catch and not under an object', () => {
+    const spots = new Set();
+    for (let i = 0; i < 20; i++) {
+      const room = started();
+      room.ant = { x: 36, z: 15, angle: 0 };
+      robotHits(room, T0 + 2000);
+      expect(room.score[0]).toBe(1);
+      const { x, z } = room.ant;
+      expect(x).toBeGreaterThanOrEqual(ANT_AREA.x0); expect(x).toBeLessThanOrEqual(ANT_AREA.x1);
+      expect(z).toBeGreaterThanOrEqual(ANT_AREA.z0); expect(z).toBeLessThanOrEqual(ANT_AREA.z1);
+      expect(Math.hypot(x - 36, z - 15)).toBeGreaterThanOrEqual(3);
+      for (const o of room.objects) expect(Math.abs(x - o.x) < o.w / 2 + 0.35 && Math.abs(z - o.z) < o.d / 2 + 0.35).toBe(false);
+      spots.add(`${x.toFixed(2)},${z.toFixed(2)}`);
+    }
+    expect(spots.size).toBeGreaterThan(15);
+  });
+  it('respawn uses the given random source', () => {
+    const room = started();
+    room.ant = { x: 40, z: 26, angle: 0 };
+    respawnAnt(room, () => 0);
+    expect(room.ant.x).toBeCloseTo(ANT_AREA.x0);
+    expect(room.ant.z).toBeCloseTo(ANT_AREA.z0);
   });
 });

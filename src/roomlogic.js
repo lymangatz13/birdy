@@ -3,7 +3,7 @@
 
 export const MATCH_MS = 180000;
 export const CATCHES_TO_WIN = 3;
-const ANT_SPAWNS = [{ x: 35.5, z: 15.5 }, { x: 39.5, z: 24.5 }, { x: 35.5, z: 24.5 }, { x: 39.5, z: 15.5 }];
+const ANT_START = { x: 35.5, z: 15.5 };
 const ROBOT_EYE = { x: 30.5, y: 15, z: 19.5 };
 
 export function newId() {
@@ -28,7 +28,7 @@ export function createRoomState(code, name, now = Date.now(), daySpeed = 1) {
     lastCatchAt: 0, antMoveAt: now, event: null,
     robot: { ...ROBOT_EYE, yaw: -Math.PI / 2, pitch: -0.45, active: 1, pressing: false, hands: [{ x: 35, y: 10, z: 18, tipX: 35, tipY: 9, tipZ: 18 }, { x: 35, y: 10, z: 21, tipX: 35, tipY: 9, tipZ: 21 }] },
     objects: startObjects(),
-    ant: { ...ANT_SPAWNS[0], angle: 0 },
+    ant: { ...ANT_START, angle: 0 },
   };
 }
 
@@ -67,13 +67,24 @@ export function tick(room, now = Date.now()) {
   return clean(room, now);
 }
 
-function antBlocked(room, x, z) {
-  return room.objects.some((o) => Math.abs(x - o.x) < o.w / 2 + 0.35 && Math.abs(z - o.z) < o.d / 2 + 0.35);
-}
+// Desk area the ant can move in
+export const ANT_AREA = { x0: 33.35, x1: 40.65, z0: 13.35, z1: 26.65 };
+const RESPAWN_MIN_DIST = 3;
 
-function respawnAnt(room) {
-  const spawn = ANT_SPAWNS[(room.score[0] - 1) % ANT_SPAWNS.length];
-  room.ant = { x: spawn.x, z: spawn.z, angle: Math.random() * Math.PI * 2 };
+const underObject = (room, x, z) =>
+  room.objects.some((o) => Math.abs(x - o.x) < o.w / 2 + 0.35 && Math.abs(z - o.z) < o.d / 2 + 0.35);
+
+// After a catch the ant reappears at a random spot on the desk, away from where it was caught
+// and not under an object (so both players can see it)
+export function respawnAnt(room, random = Math.random) {
+  const from = room.ant;
+  let x = from.x, z = from.z;
+  for (let tries = 0; tries < 200; tries++) {
+    x = ANT_AREA.x0 + random() * (ANT_AREA.x1 - ANT_AREA.x0);
+    z = ANT_AREA.z0 + random() * (ANT_AREA.z1 - ANT_AREA.z0);
+    if (Math.hypot(x - from.x, z - from.z) >= RESPAWN_MIN_DIST && !underObject(room, x, z)) break;
+  }
+  room.ant = { x, z, angle: random() * Math.PI * 2 };
 }
 
 function catchAnt(room, now) {
@@ -94,14 +105,14 @@ export function requestRematch(room, player, now = Date.now()) {
   for (const p of room.players) p.rematch = false;
   Object.assign(room, {
     score: [0, 0], status: 'playing', winner: null, winnerRole: null, endAt: now + MATCH_MS, lastCatchAt: 0, antMoveAt: now,
-    objects: startObjects(), ant: { ...ANT_SPAWNS[0], angle: 0 }, event: { type: 'rematch', at: now },
+    objects: startObjects(), ant: { ...ANT_START, angle: 0 }, event: { type: 'rematch', at: now },
   });
 }
 
 const num = (v) => Number.isFinite(Number(v));
 
 // Applies one player's update. The robot reports its arms and objects; the ant reports where it
-// wants to be, and is limited to a believable speed, the desk and the space around objects.
+// wants to be, and is limited to a believable speed and the desk.
 export function updatePlayer(room, player, data, now = Date.now()) {
   if (!player || room.status !== 'playing') return;
   if (player.slot === 0 && data.robot && typeof data.robot === 'object') {
@@ -134,11 +145,9 @@ export function updatePlayer(room, player, data, now = Date.now()) {
     const dt = Math.max(0.02, Math.min(0.35, (now - room.antMoveAt) / 1000));
     const dx = x - room.ant.x, dz = z - room.ant.z, distance = Math.hypot(dx, dz), limit = 7 * dt + 0.18;
     const scale = distance > limit ? limit / distance : 1;
-    const nextX = Math.max(33.35, Math.min(40.65, room.ant.x + dx * scale));
-    const nextZ = Math.max(13.35, Math.min(26.65, room.ant.z + dz * scale));
-    if (!antBlocked(room, nextX, nextZ)) { room.ant.x = nextX; room.ant.z = nextZ; }
-    else if (!antBlocked(room, nextX, room.ant.z)) room.ant.x = nextX;
-    else if (!antBlocked(room, room.ant.x, nextZ)) room.ant.z = nextZ;
+    // The ant moves freely on the desk, including under objects
+    room.ant.x = Math.max(ANT_AREA.x0, Math.min(ANT_AREA.x1, room.ant.x + dx * scale));
+    room.ant.z = Math.max(ANT_AREA.z0, Math.min(ANT_AREA.z1, room.ant.z + dz * scale));
     if (Number.isFinite(angle)) room.ant.angle = angle;
     room.antMoveAt = now;
   }
