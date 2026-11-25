@@ -23,6 +23,9 @@ export const GLOW = new Set([SHADE, SCREEN, LIGHT]);
 export const ROBOT_EYE = new THREE.Vector3(30.5, 15, 19.5);
 export const ROBOT_YAW = -Math.PI / 2;
 
+// Desk top surface: x 33..41, z 13..27, walking height y = 9
+export const DESK = { x0: 33, x1: 41, z0: 13, z1: 27, top: 9 };
+
 const idx = (x, y, z) => (x * SY + y) * SZ + z;
 
 export function hash(x, y, z) {
@@ -79,7 +82,7 @@ export function buildRoom() {
   fill(20, 22, 10, 12, 2, 4, SHADE);
 
   // Desk under the window (the laptop and mug are movable items, see items.js)
-  fill(33, 40, 8, 8, 13, 26, WOOD);
+  fill(DESK.x0, DESK.x1 - 1, DESK.top - 1, DESK.top - 1, DESK.z0, DESK.z1 - 1, WOOD);
   for (const [x, z] of [[33, 13], [33, 26], [40, 13], [40, 26]]) fill(x, x, 1, 7, z, z, DARKWOOD);
 
   // Wardrobe on the front wall
