@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: pulse-tag
-    runtime: node
-    buildCommand: npm ci
-    startCommand: npm start
-    healthCheckPath: /
-    autoDeployTrigger: off

@@ -1,9 +1,10 @@
 // Peer-to-peer connection for Pulse Tag, so the game needs no server of its own and can be
 // hosted as static files (GitHub Pages). The room creator's browser is the host: it holds the
 // room state (roomlogic.js) and the joining player connects to it directly over WebRTC.
-// PeerJS (vendor/peerjs.min.js, loaded as window.Peer) is used only to find the other player;
+// PeerJS is used only to find the other player;
 // by default it uses the free public PeerJS service. For testing, ?peerHost=&peerPort=&peerPath=
 // &peerSecure=0|1 point it at another PeerJS server.
+import { Peer } from 'peerjs';
 import { createRoomState, joinRoomState, updatePlayer, tick, findPlayer, randomCode } from './roomlogic.js';
 
 const PREFIX = 'birdy-pulse-tag-';
@@ -23,9 +24,8 @@ const friendly = (error) => new Error(
     : error?.message || 'Could not connect.');
 
 function openPeer(id) {
-  if (typeof window.Peer !== 'function') return Promise.reject(new Error('Connection library failed to load. Reload the page.'));
   return new Promise((resolve, reject) => {
-    const peer = id ? new window.Peer(id, peerOptions()) : new window.Peer(peerOptions());
+    const peer = id ? new Peer(id, peerOptions()) : new Peer(peerOptions());
     const done = () => { clearTimeout(timer); peer.off('open', onOpen); peer.off('error', onError); };
     const onOpen = () => { done(); resolve(peer); };
     const onError = (error) => { done(); peer.destroy(); reject(error); };

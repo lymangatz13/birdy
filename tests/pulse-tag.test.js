@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createRoomState, joinRoomState, updatePlayer, tick, findPlayer, randomCode, MATCH_MS, CATCHES_TO_WIN,
-} from '../pulse-tag/public/birdy/roomlogic.js';
+} from '../src/roomlogic.js';
 
 const T0 = 1_000_000;
 const started = () => {

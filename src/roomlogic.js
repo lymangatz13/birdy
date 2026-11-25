@@ -1,5 +1,5 @@
 // Match rules for Pulse Tag. Runs in the room creator's (robot player's) browser, which acts
-// as the host for both players. Ported from the former Node server; no DOM or network here.
+// as the host for both players. No DOM or network here.
 
 export const MATCH_MS = 180000;
 export const CATCHES_TO_WIN = 3;
