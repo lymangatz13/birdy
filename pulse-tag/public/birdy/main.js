@@ -4,6 +4,7 @@ import { Sky, hours, sunDir, smoothstep } from './sky.js';
 import { Robot, PICK_SIDE, reachLimit } from './robot.js';
 import { makeMug, makeLaptop, stepItems, slideOffEdges } from './items.js';
 import { Colony, AntView } from './ants.js';
+import { Net } from './net.js';
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
@@ -12,12 +13,9 @@ let code = null, playerId = null, mine = null, state = null, renderer, scene, ca
 let active = false, lastTime = 0, lastSend = 0, lastPoll = 0, antPos = { x: 35.5, z: 15.5, angle: 0 }, antSpeed = 0, displayedAnt = new THREE.Vector3(35.5, 9.03, 15.5);
 let keys = new Set(), mouse = new THREE.Vector2(0, -0.2), pressMouse = false, eventAt = 0, hintUntil = 0, hint = '', moveBusy = false, pollBusy = false;
 
-async function api(path, data) {
-  const response = await fetch(path, data ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } : { cache: 'no-store' });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Could not connect to the room.');
-  return result;
-}
+// Players connect directly to each other; the room creator's browser hosts the match (net.js)
+const net = new Net();
+let connecting = false;
 function showError(message) { $('error').textContent = message || ''; }
 function connect(result) {
   playerId = result.playerId;
@@ -38,16 +36,21 @@ function connect(result) {
   requestAnimationFrame(frame);
 }
 $('createBtn').onclick = async () => {
-  showError('');
-  try { connect(await api('/api/rooms', { name: playerName.value.trim() || 'player 1green' })); }
+  if (connecting) return;
+  connecting = true; showError('Creating room…');
+  try { const result = await net.createRoom(playerName.value.trim() || 'player 1green'); showError(''); connect(result); }
   catch (error) { showError(error.message); }
+  finally { connecting = false; }
 };
 $('joinBtn').onclick = async () => {
   showError('');
   const codeValue = roomCodeInput.value.trim().toUpperCase();
   if (codeValue.length !== 4) return showError('Enter the 4-character room code.');
-  try { connect(await api(`/api/rooms/${codeValue}/join`, { name: playerName.value.trim() || 'player 1red' })); }
+  if (connecting) return;
+  connecting = true; showError('Connecting to room…');
+  try { const result = await net.joinRoom(codeValue, playerName.value.trim() || 'player 1red'); showError(''); connect(result); }
   catch (error) { showError(error.message); }
+  finally { connecting = false; }
 };
 roomCodeInput.oninput = () => {
   roomCodeInput.value = roomCodeInput.value.toUpperCase().replace(/[^A-F0-9]/g, '');
@@ -56,7 +59,7 @@ roomCodeInput.oninput = () => {
 roomCodeInput.onkeydown = (event) => { if (event.key === 'Enter') $('joinBtn').click(); };
 if (query.has('room')) { roomCodeInput.value = query.get('room').toUpperCase(); playerName.value = 'player 1red'; }
 $('copyCode').onclick = async () => {
-  try { await navigator.clipboard.writeText(`${location.origin}/?room=${code}`); $('copyCode').textContent = 'COPIED'; setTimeout(() => $('copyCode').textContent = 'COPY LINK', 1300); }
+  try { await navigator.clipboard.writeText(`${location.origin}${location.pathname}?room=${code}`); $('copyCode').textContent = 'COPIED'; setTimeout(() => $('copyCode').textContent = 'COPY LINK', 1300); }
   catch { $('copyCode').textContent = `CODE ${code}`; }
 };
 
@@ -247,7 +250,7 @@ function updateHud() {
   const seconds = state.timeLeft ?? 180;
   $('clock').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   $('matchStatus').textContent = state.status === 'playing' ? (mine.role === 'robot' ? 'CATCH THE ANT' : 'DODGE THE GRIPPER') : state.status === 'ended' ? 'MATCH COMPLETE' : 'WAITING FOR ANT PLAYER';
-  $('connectionText').textContent = state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
+  $('connectionText').textContent = net.connectionLost ? 'CONNECTION LOST' : state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
   $('waiting').classList.toggle('hidden', state.status !== 'waiting');
   if (state.event?.at && state.event.at !== eventAt) {
     eventAt = state.event.at;
@@ -293,15 +296,15 @@ async function sendMove() {
   const payload = { playerId };
   if (mine.role === 'robot') payload.robot = localRobotSync();
   else payload.ant = antPos;
-  try { const result = await api(`/api/rooms/${code}/move`, payload); acceptState(result.state); updateHud(); }
-  catch { $('connectionText').textContent = 'RECONNECTING'; }
+  try { const result = await net.move(payload); acceptState(result.state); updateHud(); }
+  catch { $('connectionText').textContent = 'CONNECTION LOST'; }
   finally { moveBusy = false; }
 }
 async function poll() {
   if (pollBusy || !code) return;
   pollBusy = true;
-  try { const result = await api(`/api/rooms/${code}`); acceptState(result.state); updateHud(); }
-  catch { $('connectionText').textContent = 'RECONNECTING'; }
+  try { const result = await net.poll(); acceptState(result.state); updateHud(); }
+  catch { $('connectionText').textContent = 'CONNECTION LOST'; }
   finally { pollBusy = false; }
 }
 function frame(now) {
