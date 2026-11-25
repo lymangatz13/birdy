@@ -19,8 +19,9 @@ const COLORS = [
 // Blocks that light up at night
 export const GLOW = new Set([SHADE, SCREEN, LIGHT]);
 
-// Where the bird starts: middle of the room, facing the bed (-z)
-export const START = new THREE.Vector3(20.5, 14, 30);
+// Where the robot stands: in front of the desk, eyes at 1.4 m, facing the window (+x)
+export const ROBOT_EYE = new THREE.Vector3(30.5, 15, 19.5);
+export const ROBOT_YAW = -Math.PI / 2;
 
 const idx = (x, y, z) => (x * SY + y) * SZ + z;
 
@@ -77,15 +78,9 @@ export function buildRoom() {
   fill(21, 21, 8, 9, 3, 3, METAL);
   fill(20, 22, 10, 12, 2, 4, SHADE);
 
-  // Desk under the window, laptop and mug, chair facing the desk
+  // Desk under the window (the laptop and mug are movable items, see items.js)
   fill(33, 40, 8, 8, 13, 26, WOOD);
   for (const [x, z] of [[33, 13], [33, 26], [40, 13], [40, 26]]) fill(x, x, 1, 7, z, z, DARKWOOD);
-  fill(35, 38, 9, 9, 17, 22, METAL);
-  fill(39, 39, 10, 13, 17, 22, SCREEN);
-  fill(34, 34, 9, 10, 24, 24, MUG);
-  fill(28, 32, 5, 5, 17, 22, DARKWOOD);
-  for (const [x, z] of [[28, 17], [28, 22], [32, 17], [32, 22]]) fill(x, x, 1, 4, z, z, DARKWOOD);
-  fill(28, 28, 6, 11, 17, 22, DARKWOOD);
 
   // Wardrobe on the front wall
   fill(3, 14, 1, 22, 32, 36, WOOD);
