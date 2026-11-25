@@ -3,6 +3,7 @@ import { Room, ROBOT_EYE, ROBOT_YAW } from './room.js';
 import { Sky, hours, sunDir, smoothstep } from './sky.js';
 import { Robot, PICK_SIDE, reachLimit } from './robot.js';
 import { makeMug, makeLaptop, stepItems, slideOffEdges } from './items.js';
+import { Colony, AntView } from './ants.js';
 
 const q = new URLSearchParams(location.search);
 const speed = Number(q.get('speed')) || 1;
@@ -26,16 +27,21 @@ for (const it of items) scene.add(it.group);
 
 const robot = new Robot(scene, ROBOT_EYE, ROBOT_YAW);
 
+// 100 ants wandering the desk at random speeds
+const colony = new Colony(100, items);
+const antView = new AntView(scene, colony);
+
 // ---------- Input ----------
 const keys = new Set();
+let pressMouse = false; // right mouse button held: press the active gripper down onto the surface
 addEventListener('keydown', (e) => {
-  if (e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   if (e.code === 'KeyQ') robot.active = 0;
   if (e.code === 'KeyE') robot.active = 1;
   keys.add(e.code);
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
-addEventListener('blur', () => keys.clear());
+addEventListener('blur', () => { keys.clear(); pressMouse = false; });
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -47,12 +53,16 @@ addEventListener('mousemove', (e) => mouse.set((e.clientX / innerWidth) * 2 - 1,
 addEventListener('contextmenu', (e) => e.preventDefault());
 
 const raycaster = new THREE.Raycaster();
+const downRay = new THREE.Raycaster();
+const DOWN = new THREE.Vector3(0, -1, 0);
 const aimTargets = () => [room.mesh, room.glow, ...items.filter((it) => !it.held).map((it) => it.group)];
 
 let hint = '', hintUntil = 0;
 
 // Click: drop what the active hand holds, or reach for the item under the cursor / nearest the hand
+addEventListener('mouseup', (e) => { if (e.button === 2) pressMouse = false; });
 addEventListener('mousedown', (e) => {
+  if (e.button === 2) pressMouse = true;
   if (e.button !== 0) return;
   const arm = robot.activeArm;
   if (arm.reachFor) { arm.reachFor = null; return; }
@@ -88,9 +98,16 @@ function aimActiveHand() {
   if (arm.reachFor) return; // the hand is on its way to an item
   raycaster.setFromCamera(mouse, camera);
   const hit = raycaster.intersectObjects(aimTargets(), true)[0];
+  const pressing = pressMouse || keys.has('Space');
   const point = hit
-    ? hit.point.clone().addScaledVector(hit.face.normal, 0.6)
+    ? hit.point.clone().addScaledVector(hit.face.normal, pressing ? 0.1 : 0.9)
     : raycaster.ray.origin.clone().addScaledVector(raycaster.ray.direction, 9);
+  if (!pressing) {
+    // Hover clear of whatever is directly below (aiming at a side face would otherwise dip the hand)
+    downRay.set(new THREE.Vector3(point.x, point.y + 0.5, point.z), DOWN);
+    const below = downRay.intersectObjects(aimTargets(), true)[0];
+    if (below) point.y = Math.max(point.y, below.point.y + 0.9);
+  }
   if (arm.held) point.y += arm.held.h;
   arm.target.copy(point).add(new THREE.Vector3(0, 0.4, 0));
 }
@@ -108,6 +125,8 @@ renderer.setAnimationLoop(() => {
   robot.update(dt, keys);
   robot.applyTo(camera);
   stepItems(dt, items, room.solidAt);
+  colony.step(dt, items, robot.arms.map((a) => ({ hand: a.hand, tip: a.tip })));
+  antView.update();
 
   const h = hours(t);
   sky.update(h, camera.position);
@@ -120,6 +139,7 @@ renderer.setAnimationLoop(() => {
   const status = arm.held ? ' holding ' + arm.held.name : arm.reachFor ? ' reaching for ' + arm.reachFor.name : '';
   const note = performance.now() < hintUntil ? '  (' + hint + ')' : '';
   hud.textContent = `${hh}:${mm}  ${robot.active ? 'Right' : 'Left'} arm${status}${note}\n` +
-    'Mouse: aim hand  Click: grab/drop  Q/E: left/right arm  A/D: turn  W/S: look up/down';
+    'Mouse: aim hand  Click: grab/drop  Right-click or Space (hold): press down\n' +
+    'Q/E: left/right arm  A/D: turn  W/S: look up/down';
   renderer.render(scene, camera);
 });

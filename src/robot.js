@@ -150,6 +150,7 @@ export class Robot {
       arm.shoulderBall.rotation.set(0, this.yaw, 0);
       arm.elbowBall.position.copy(elbow);
       arm.gripper.position.copy(hand);
+      arm.tip = hand.clone().addScaledVector(foreDir, 1.15); // finger tips
       arm.gripper.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), foreDir);
       const spread = arm.held ? 0.38 : 0.6;
       arm.fingers[0].position.set(-spread, -0.6, 0);
