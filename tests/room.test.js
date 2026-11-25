@@ -1,16 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { Vector3 } from 'three';
-import { buildRoom, buildGeometry, solidAt, START, SX, SY, SZ, GLASS } from '../src/room.js';
-import { Drone, boxHits } from '../src/drone.js';
+import { buildRoom, buildGeometry, solidAt, ROBOT_EYE, SX, SY, SZ, GLASS } from '../src/room.js';
 
 const g = buildRoom();
 const solid = (x, y, z) => solidAt(g, x, y, z);
-const ROOM_OPTS = { accel: 14, lift: 8, ceiling: Infinity, radius: 0.35 };
-const fly = (keys, secs) => {
-  const d = new Drone(START, ROOM_OPTS);
-  for (let i = 0; i < secs * 60; i++) d.update(1 / 60, new Set(keys), null, solid);
-  return d;
-};
 
 describe('room', () => {
   it('builds a non-empty mesh', () => {
@@ -24,22 +16,18 @@ describe('room', () => {
     expect(solid(20, 0, 20)).toBe(true);      // floor
     expect(solid(20, SY - 1, 20)).toBe(true); // ceiling
   });
-  it('window glass blocks the bird', () => {
+  it('window glass is solid', () => {
     expect(g[(41 * SY + 14) * SZ + 15]).toBe(GLASS);
     expect(solid(41, 14, 15)).toBe(true);
   });
-  it('bird starts in open air', () => {
-    expect(boxHits(START, ROOM_OPTS.radius, solid)).toBe(false);
+  it('robot spot in front of the desk is clear floor to eye height', () => {
+    for (let y = 1; y <= ROBOT_EYE.y; y++)
+      for (const [dx, dz] of [[-1, -2], [-1, 2], [0, 0], [0, -2], [0, 2]])
+        expect(solid(ROBOT_EYE.x + dx, y, ROBOT_EYE.z + dz)).toBe(false);
   });
-  it('flying forward stops at the back wall', () => {
-    const d = fly(['ArrowUp'], 15);
-    expect(d.pos.z).toBeGreaterThan(1.3);
-    expect(d.pos.z).toBeLessThan(3);
-  });
-  it('descending stops on the floor', () => {
-    const d = new Drone(new Vector3(20.5, 10, 15), ROOM_OPTS);
-    for (let i = 0; i < 600; i++) d.update(1 / 60, new Set(['KeyS']), null, solid);
-    expect(d.pos.y).toBeGreaterThan(1.3);
-    expect(d.pos.y).toBeLessThan(2);
+  it('desk top is clear for movable items', () => {
+    expect(solid(36, 8, 20)).toBe(true);
+    expect(solid(36, 9, 20)).toBe(false);
+    expect(solid(34, 9, 24)).toBe(false);
   });
 });
