@@ -5,11 +5,12 @@
 // by default it uses the free public PeerJS service. For testing, ?peerHost=&peerPort=&peerPath=
 // &peerSecure=0|1 point it at another PeerJS server.
 import { Peer } from 'peerjs';
-import { createRoomState, joinRoomState, updatePlayer, tick, findPlayer, randomCode } from './roomlogic.js';
+import { createRoomState, joinRoomState, updatePlayer, requestRematch, tick, findPlayer, randomCode } from './roomlogic.js';
 
 const PREFIX = 'birdy-pulse-tag-';
 const CONNECT_TIMEOUT = 15000;
-const SILENCE_LIMIT = 4000; // no messages for this long during a match = connection lost
+const SILENCE_LIMIT = 4000; // no messages for this long = connection lost
+const PING_EVERY = 1000;    // keep-alive, so a player who left is noticed even between matches
 
 function peerOptions() {
   const q = new URLSearchParams(location.search);
@@ -48,7 +49,7 @@ export class Net {
   }
 
   // Robot player: create a room and wait for the ant player
-  async createRoom(name) {
+  async createRoom(name, daySpeed = 1) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = randomCode();
       try {
@@ -58,7 +59,7 @@ export class Net {
         throw friendly(error);
       }
       this.isHost = true;
-      this.room = createRoomState(code, name);
+      this.room = createRoomState(code, name, Date.now(), daySpeed);
       this.peer.on('connection', (conn) => this.accept(conn));
       // Stay registered with the connection service so a player can still join after a network blip
       this.peer.on('disconnected', () => { if (!this.peer.destroyed) this.peer.reconnect(); });
@@ -76,9 +77,13 @@ export class Net {
         if (result.error) { conn.send({ type: 'error', error: result.error }); setTimeout(() => conn.close(), 500); return; }
         conn.playerId = result.player.id;
         this.guest = conn;
+        this.keepAlive(conn);
         conn.send({ type: 'joined', playerId: result.player.id, state: tick(this.room) });
       } else if (msg?.type === 'move' && conn === this.guest) {
         updatePlayer(this.room, findPlayer(this.room, conn.playerId), msg);
+        conn.send({ type: 'state', state: tick(this.room) });
+      } else if (msg?.type === 'rematch' && conn === this.guest) {
+        requestRematch(this.room, findPlayer(this.room, conn.playerId));
         conn.send({ type: 'state', state: tick(this.room) });
       }
     });
@@ -107,6 +112,7 @@ export class Net {
         if (msg?.type === 'joined' && !settled) {
           settled = true; clearTimeout(timer);
           this.conn = conn; this.latest = msg.state;
+          this.keepAlive(conn);
           resolve({ playerId: msg.playerId, state: msg.state });
         } else if (msg?.type === 'state') this.latest = msg.state;
         else if (msg?.type === 'error') fail(msg.error);
@@ -115,10 +121,16 @@ export class Net {
     });
   }
 
+  keepAlive(conn) {
+    this.lastHeard = performance.now();
+    clearInterval(this.pinger);
+    this.pinger = setInterval(() => { if (conn.open) conn.send({ type: 'ping' }); }, PING_EVERY);
+  }
+
   get connectionLost() {
     const silent = performance.now() - this.lastHeard > SILENCE_LIMIT;
-    if (this.isHost) return this.room?.status === 'playing' && (this.room.players[1]?.connected === false || silent);
-    return this.lost || (this.latest?.status === 'playing' && silent);
+    if (this.isHost) return this.room?.players.length === 2 && (this.room.players[1].connected === false || silent);
+    return this.lost || (Boolean(this.conn) && silent);
   }
 
   // Send this player's update; resolves with the newest room state
@@ -131,6 +143,19 @@ export class Net {
     }
     if (!this.conn?.open) throw new Error('Lost connection to the other player.');
     this.conn.send({ type: 'move', ...payload });
+    return { state: this.latest };
+  }
+
+  // Ask for a rematch in the same room; it starts once both players have asked
+  async rematch() {
+    if (this.isHost) {
+      requestRematch(this.room, this.room.players[0]);
+      const state = tick(this.room);
+      if (this.guest?.open) this.guest.send({ type: 'state', state });
+      return { state };
+    }
+    if (!this.conn?.open) throw new Error('Lost connection to the other player.');
+    this.conn.send({ type: 'rematch' });
     return { state: this.latest };
   }
 

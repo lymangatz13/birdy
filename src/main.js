@@ -12,6 +12,18 @@ const playerName = $('playerName'), roomCodeInput = $('roomCode');
 let code = null, playerId = null, mine = null, state = null, renderer, scene, camera, room, sky, robot, colony, antView, humanAnt, items;
 let active = false, lastTime = 0, lastSend = 0, lastPoll = 0, antPos = { x: 35.5, z: 15.5, angle: 0 }, antSpeed = 0, displayedAnt = new THREE.Vector3(35.5, 9.03, 15.5);
 let keys = new Set(), mouse = new THREE.Vector2(0, -0.2), pressMouse = false, eventAt = 0, hintUntil = 0, hint = '', moveBusy = false, pollBusy = false;
+let antMarker = null, clockOffset = 0, rematchAsked = false;
+const BACKGROUND_ANTS = 30;
+const daySpeed = Number(query.get('speed')) || 1;
+// Player names shown as "NAME · ROLE", or just the role when the name is the default
+const label = (player, role) => {
+  const name = (player?.name || '').trim();
+  return !name || name.toLowerCase() === role.toLowerCase() ? role.toUpperCase() : `${name.toUpperCase()} · ${role.toUpperCase()}`;
+};
+const FOOTERS = {
+  robot: '<span>MOUSE AIM</span><span>CLICK GRAB/DROP</span><span><kbd>SPACE</kbd>/RIGHT-CLICK PRESS</span><span><kbd>Q</kbd>/<kbd>E</kbd> ARM</span><span><kbd>A</kbd>/<kbd>D</kbd> TURN</span><span><kbd>W</kbd>/<kbd>S</kbd> LOOK</span><span class="tip">Drop or slam an object onto the red ant.</span>',
+  ant: '<span><kbd>W</kbd> ACCELERATE</span><span><kbd>S</kbd> BRAKE/REVERSE</span><span><kbd>A</kbd>/<kbd>D</kbd> STEER</span><span class="tip">Stay clear of falling and slammed objects.</span>',
+};
 
 // Players connect directly to each other; the room creator's browser hosts the match (net.js)
 const net = new Net();
@@ -27,6 +39,7 @@ function connect(result) {
   $('game').classList.remove('hidden');
   $('roomLabel').textContent = code;
   $('bigCode').textContent = code;
+  $('gameFooter').innerHTML = FOOTERS[mine.role];
   $('antControls').classList.toggle('hidden', mine.role !== 'ant');
   $('robotControls').classList.toggle('hidden', mine.role !== 'robot');
   buildScene();
@@ -38,7 +51,7 @@ function connect(result) {
 $('createBtn').onclick = async () => {
   if (connecting) return;
   connecting = true; showError('Creating room…');
-  try { const result = await net.createRoom(playerName.value.trim() || 'player 1green'); showError(''); connect(result); }
+  try { const result = await net.createRoom(playerName.value.trim() || 'Robot', daySpeed); showError(''); connect(result); }
   catch (error) { showError(error.message); }
   finally { connecting = false; }
 };
@@ -48,16 +61,21 @@ $('joinBtn').onclick = async () => {
   if (codeValue.length !== 4) return showError('Enter the 4-character room code.');
   if (connecting) return;
   connecting = true; showError('Connecting to room…');
-  try { const result = await net.joinRoom(codeValue, playerName.value.trim() || 'player 1red'); showError(''); connect(result); }
+  try { const result = await net.joinRoom(codeValue, playerName.value.trim() || 'Ant'); showError(''); connect(result); }
   catch (error) { showError(error.message); }
   finally { connecting = false; }
 };
-roomCodeInput.oninput = () => {
-  roomCodeInput.value = roomCodeInput.value.toUpperCase().replace(/[^A-F0-9]/g, '');
-  if (roomCodeInput.value && playerName.value.toLowerCase() === 'player 1green') playerName.value = 'player 1red';
-};
+roomCodeInput.oninput = () => { roomCodeInput.value = roomCodeInput.value.toUpperCase().replace(/[^A-F0-9]/g, ''); };
 roomCodeInput.onkeydown = (event) => { if (event.key === 'Enter') $('joinBtn').click(); };
-if (query.has('room')) { roomCodeInput.value = query.get('room').toUpperCase(); playerName.value = 'player 1red'; }
+if (query.has('room')) roomCodeInput.value = query.get('room').toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 4);
+// Rematch in the same room; once the rival has left, start a new room instead
+$('rematchBtn').onclick = async () => {
+  if (net.connectionLost) { location.href = location.pathname; return; }
+  if (rematchAsked) return;
+  rematchAsked = true;
+  try { const result = await net.rematch(); acceptState(result.state); updateHud(); }
+  catch { rematchAsked = false; }
+};
 $('copyCode').onclick = async () => {
   try { await navigator.clipboard.writeText(`${location.origin}${location.pathname}?room=${code}`); $('copyCode').textContent = 'COPIED'; setTimeout(() => $('copyCode').textContent = 'COPY LINK', 1300); }
   catch { $('copyCode').textContent = `CODE ${code}`; }
@@ -79,12 +97,25 @@ function buildScene() {
   items = [makeLaptop().place(37, DESK.top, 19.5), makeMug().place(34.5, DESK.top, 24.5)];
   for (const item of items) scene.add(item.group);
   robot = new Robot(scene, ROBOT_EYE, ROBOT_YAW);
-  colony = new Colony(100, items);
+  colony = new Colony(BACKGROUND_ANTS, items);
   antView = new AntView(scene, colony);
   humanAnt = new THREE.Mesh(antView.mesh.geometry, new THREE.MeshLambertMaterial({ color: 0xff4d6d }));
   humanAnt.visible = mine.role !== 'ant';
   humanAnt.frustumCulled = false;
   scene.add(humanAnt);
+  if (mine.role === 'robot') {
+    // Marker so the robot can pick out the player ant among the background ants
+    const red = new THREE.MeshBasicMaterial({ color: 0xff4d6d });
+    antMarker = new THREE.Group();
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.7, 4), red);
+    arrow.rotation.x = Math.PI;
+    arrow.name = 'arrow';
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff4d6d, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.name = 'ring';
+    antMarker.add(arrow, ring);
+    scene.add(antMarker);
+  }
   $('scene').addEventListener('mousemove', onMouseMove);
   $('scene').addEventListener('pointermove', onMouseMove);
   $('scene').addEventListener('touchstart', onTouchAim, { passive: false });
@@ -188,7 +219,8 @@ function aimActiveHand() {
     const below = downRay.intersectObjects(aimTargets(), true)[0];
     if (below) point.y = Math.max(point.y, below.point.y + 0.9);
   }
-  if (arm.held) point.y += arm.held.h;
+  // Pressing while holding an object slams it down onto the surface
+  if (arm.held) point.y += pressing ? arm.held.h - 0.65 : arm.held.h;
   arm.target.copy(point).add(new THREE.Vector3(0, 0.4, 0));
 }
 
@@ -230,6 +262,14 @@ function syncAntMesh() {
   humanAnt.position.copy(displayedAnt);
   humanAnt.rotation.y = -(target.angle || 0);
   humanAnt.position.y += Math.abs(Math.sin(performance.now() * 0.012)) * 0.035;
+  if (antMarker) {
+    const t = performance.now() / 1000;
+    antMarker.position.set(displayedAnt.x, DESK.top, displayedAnt.z);
+    antMarker.getObjectByName('arrow').position.y = 1.3 + Math.sin(t * 4) * 0.15;
+    antMarker.getObjectByName('arrow').rotation.y = t * 2;
+    antMarker.getObjectByName('ring').position.y = 0.03;
+    antMarker.visible = state.status === 'playing';
+  }
 }
 function updateCamera() {
   if (mine.role === 'robot') {
@@ -243,8 +283,8 @@ function updateHud() {
   if (!state || !mine) return;
   const robotPlayer = state.players.find((player) => player.role === 'robot');
   const antPlayer = state.players.find((player) => player.role === 'ant');
-  $('name0').textContent = `${(robotPlayer?.name || 'player 1green').toUpperCase()} · ROBOT`;
-  $('name1').textContent = `${(antPlayer?.name || 'player 1red').toUpperCase()} · ANT`;
+  $('name0').textContent = label(robotPlayer, 'Robot');
+  $('name1').textContent = label(antPlayer, 'Ant');
   $('score0').textContent = `${state.score[0]} / 3`;
   $('score1').textContent = state.status === 'waiting' ? 'JOIN TO PLAY' : 'SURVIVE';
   const seconds = state.timeLeft ?? 180;
@@ -254,29 +294,50 @@ function updateHud() {
   $('waiting').classList.toggle('hidden', state.status !== 'waiting');
   if (state.event?.at && state.event.at !== eventAt) {
     eventAt = state.event.at;
-    hint = state.event.type === 'caught' ? `ANT CAUGHT  ${state.event.score}/3` : 'THE ANT ESCAPED';
+    hint = { caught: `ANT CAUGHT  ${state.event.score}/3`, escape: 'THE ANT ESCAPED', rematch: 'REMATCH  ·  GO!' }[state.event.type] || '';
     hintUntil = performance.now() + 1800;
     $('toast').textContent = hint;
     $('toast').classList.remove('show'); void $('toast').offsetWidth; $('toast').classList.add('show');
   }
+  $('result').classList.toggle('hidden', state.status !== 'ended');
   if (state.status === 'ended') {
-    $('result').classList.remove('hidden');
-    const won = state.winner === mine.name;
+    const won = state.winnerRole === mine.role;
     $('resultTitle').textContent = won ? 'YOU WIN' : 'YOU LOSE';
     $('resultTitle').style.color = won ? 'var(--mint)' : 'var(--coral)';
-    $('resultScore').textContent = state.winner === robotPlayer?.name ? 'Robot caught the ant three times.' : 'The ant survived the full three minutes.';
+    const rival = state.players.find((player) => player.id !== mine.id);
+    const outcome = state.winnerRole === 'robot' ? 'Robot caught the ant three times.' : 'The ant survived the full three minutes.';
+    $('resultScore').textContent = outcome + (rival?.rematch && !rematchAsked ? '  Your rival wants a rematch.' : '');
+    $('rematchBtn').innerHTML = net.connectionLost ? 'NEW ROOM <span>↗</span>' : rematchAsked ? 'WAITING FOR RIVAL…' : 'REMATCH <span>↗</span>';
   }
+  const tip = performance.now() < hintUntil ? hint : null;
   $('hud').textContent = mine.role === 'robot'
-    ? `ROBOT  ·  ${mine.name.toUpperCase()}\nClick an object to grab/drop  ·  Mouse aim  ·  Q/E arms\n${performance.now() < hintUntil ? hint : 'Hit the red ant with the mug or laptop.'}`
-    : `ANT  ·  ${mine.name.toUpperCase()}  ·  SPEED ${Math.abs(antSpeed).toFixed(1)}\nW accelerate  ·  S brake/reverse  ·  A/D steer\n${performance.now() < hintUntil ? hint : 'Stay out of the robot’s moving objects.'}`;
+    ? `${label(mine, 'Robot')}\nMouse aim  ·  Click grab/drop  ·  Space or right-click press  ·  Q/E arm  ·  A/D turn  ·  W/S look\n${tip || 'Drop or slam the mug or laptop onto the red ant.'}`
+    : `${label(mine, 'Ant')}  ·  SPEED ${Math.abs(antSpeed).toFixed(1)}\nW accelerate  ·  S brake/reverse  ·  A/D steer\n${tip || 'Stay clear of falling and slammed objects.'}`;
 }
 function acceptState(next) {
+  if (!next) return;
   const newCatch = next.event?.type === 'caught' && next.event.at !== state?.event?.at;
+  const newMatch = next.event?.type === 'rematch' && next.event.at !== state?.event?.at;
+  if (Number.isFinite(next.clock)) clockOffset = next.clock - Date.now();
   state = next;
+  if (newMatch) startRematch();
   if (mine?.role === 'ant' && newCatch && state.ant) {
     antPos = { ...state.ant };
     antSpeed = 0;
   }
+}
+// A rematch started: put the desk back the way it was at the start
+function startRematch() {
+  rematchAsked = false;
+  hintUntil = 0;
+  if (mine.role === 'robot') {
+    for (const arm of robot.arms) { arm.held = null; arm.reachFor = null; }
+    for (const [i, item] of items.entries()) { const o = state.objects[i]; item.held = null; item.vy = 0; item.place(o.x, o.y, o.z); }
+  } else {
+    antPos = { ...state.ant };
+    antSpeed = 0;
+  }
+  displayedAnt.set(state.ant.x, DESK.top + 0.03, state.ant.z);
 }
 function syncRemoteObjects() {
   if (mine.role !== 'ant' || !state?.objects) return;
@@ -326,7 +387,9 @@ function frame(now) {
   antView.update();
   syncAntMesh();
   if (mine.role === 'ant') updateCamera();
-  const gameHours = hours((now / 1000) * (Number(query.get('speed')) || 1));
+  // Both players use the host's sky clock, so they see the same time of day
+  const skySeconds = state.createdAt ? (Date.now() + clockOffset - state.createdAt) / 1000 : now / 1000;
+  const gameHours = hours(skySeconds * (state.daySpeed || 1));
   const night = 1 - smoothstep(-0.1, 0.3, sunDir(gameHours).y);
   sky.update(gameHours, camera.position);
   room.update(night);
