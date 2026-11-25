@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Room, ROBOT_EYE, ROBOT_YAW } from './room.js';
 import { Sky, hours, sunDir, smoothstep } from './sky.js';
-import { Robot } from './robot.js';
+import { Robot, PICK_SIDE, reachLimit } from './robot.js';
 import { makeMug, makeLaptop, stepItems, slideOffEdges } from './items.js';
 
 const q = new URLSearchParams(location.search);
@@ -49,10 +49,13 @@ addEventListener('contextmenu', (e) => e.preventDefault());
 const raycaster = new THREE.Raycaster();
 const aimTargets = () => [room.mesh, room.glow, ...items.filter((it) => !it.held).map((it) => it.group)];
 
-// Click: drop what the active hand holds, or grab the item under the cursor / nearest the hand
+let hint = '', hintUntil = 0;
+
+// Click: drop what the active hand holds, or reach for the item under the cursor / nearest the hand
 addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   const arm = robot.activeArm;
+  if (arm.reachFor) { arm.reachFor = null; return; }
   if (arm.held) {
     arm.held.held = null;
     arm.held.vy = 0;
@@ -62,19 +65,29 @@ addEventListener('mousedown', (e) => {
   }
   raycaster.setFromCamera(mouse, camera);
   const hit = raycaster.intersectObjects(aimTargets(), true)[0];
+  const top = (it) => it.pos.clone().setY(it.pos.y + it.h + 0.4);
+  const near = (it) => top(it).distanceTo(arm.hand);
+  const S = robot.shoulder(arm.side);
+  const reachable = (it) => {
+    const v = top(it).sub(S);
+    return v.length() <= reachLimit(v.clone().normalize()) &&
+      Math.hypot(it.pos.x - robot.eye.x, it.pos.z - robot.eye.z) <= PICK_SIDE;
+  };
   let pick = hit && hit.object.userData.item;
-  const near = (it) => it.pos.clone().setY(it.pos.y + it.h).distanceTo(arm.hand);
-  if (!pick || near(pick) > 3) {
-    pick = items.filter((it) => !it.held && near(it) < 2.5).sort((a, b) => near(a) - near(b))[0];
+  if (pick && (pick.held || !reachable(pick))) {
+    if (!pick.held) { hint = `${pick.name} is out of reach`; hintUntil = performance.now() + 1500; }
+    pick = null;
   }
-  if (pick && !pick.held) { pick.held = arm; arm.held = pick; }
+  if (!pick) pick = items.filter((it) => !it.held && near(it) < 2.5).sort((a, b) => near(a) - near(b))[0];
+  if (pick) arm.reachFor = pick;
 });
 
 // Active hand follows the surface point under the cursor, hovering just above it
 function aimActiveHand() {
+  const arm = robot.activeArm;
+  if (arm.reachFor) return; // the hand is on its way to an item
   raycaster.setFromCamera(mouse, camera);
   const hit = raycaster.intersectObjects(aimTargets(), true)[0];
-  const arm = robot.activeArm;
   const point = hit
     ? hit.point.clone().addScaledVector(hit.face.normal, 0.6)
     : raycaster.ray.origin.clone().addScaledVector(raycaster.ray.direction, 9);
@@ -104,7 +117,9 @@ renderer.setAnimationLoop(() => {
 
   const hh = String(Math.floor(h)).padStart(2, '0'), mm = String(Math.floor((h % 1) * 60)).padStart(2, '0');
   const arm = robot.activeArm;
-  hud.textContent = `${hh}:${mm}  ${robot.active ? 'Right' : 'Left'} arm${arm.held ? ' holding ' + arm.held.name : ''}\n` +
+  const status = arm.held ? ' holding ' + arm.held.name : arm.reachFor ? ' reaching for ' + arm.reachFor.name : '';
+  const note = performance.now() < hintUntil ? '  (' + hint + ')' : '';
+  hud.textContent = `${hh}:${mm}  ${robot.active ? 'Right' : 'Left'} arm${status}${note}\n` +
     'Mouse: aim hand  Click: grab/drop  Q/E: left/right arm  A/D: turn  W/S: look up/down';
   renderer.render(scene, camera);
 });
