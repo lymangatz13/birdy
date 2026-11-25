@@ -15,15 +15,19 @@ export function randomCode() {
   return Math.floor(Math.random() * 0x10000).toString(16).toUpperCase().padStart(4, '0');
 }
 
-export function createRoomState(code, name, now = Date.now()) {
-  const player = { id: newId(), name: String(name || 'player 1green').slice(0, 16), role: 'robot', color: '#60f5c3', slot: 0, connected: true };
+const startObjects = () => [
+  { x: 37, y: 9, z: 19.5, w: 4, d: 6, h: 4.4, held: false },
+  { x: 34.5, y: 9, z: 24.5, w: 1.2, d: 1.2, h: 1.6, held: false },
+];
+
+// daySpeed: how fast the day/night cycle runs; both players see the host's sky clock
+export function createRoomState(code, name, now = Date.now(), daySpeed = 1) {
+  const player = { id: newId(), name: String(name || 'Robot').slice(0, 16), role: 'robot', color: '#60f5c3', slot: 0, connected: true, rematch: false };
   return {
-    code, players: [player], score: [0, 0], status: 'waiting', winner: null, endAt: 0, createdAt: now, lastCatchAt: 0, antMoveAt: now, event: null,
+    code, players: [player], score: [0, 0], status: 'waiting', winner: null, winnerRole: null, endAt: 0, createdAt: now, daySpeed,
+    lastCatchAt: 0, antMoveAt: now, event: null,
     robot: { ...ROBOT_EYE, yaw: -Math.PI / 2, pitch: -0.45, active: 1, pressing: false, hands: [{ x: 35, y: 10, z: 18, tipX: 35, tipY: 9, tipZ: 18 }, { x: 35, y: 10, z: 21, tipX: 35, tipY: 9, tipZ: 21 }] },
-    objects: [
-      { x: 37, y: 9, z: 19.5, w: 4, d: 6, h: 4.4, held: false },
-      { x: 34.5, y: 9, z: 24.5, w: 1.2, d: 1.2, h: 1.6, held: false },
-    ],
+    objects: startObjects(),
     ant: { ...ANT_SPAWNS[0], angle: 0 },
   };
 }
@@ -31,7 +35,7 @@ export function createRoomState(code, name, now = Date.now()) {
 // Adds the ant player and starts the match. Returns { player } or { error }.
 export function joinRoomState(room, name, now = Date.now()) {
   if (room.players.length >= 2) return { error: 'This room already has two players.' };
-  const player = { id: newId(), name: String(name || 'player 1red').slice(0, 16), role: 'ant', color: '#ff4d6d', slot: 1, connected: true };
+  const player = { id: newId(), name: String(name || 'Ant').slice(0, 16), role: 'ant', color: '#ff4d6d', slot: 1, connected: true, rematch: false };
   room.players.push(player);
   room.status = 'playing';
   room.endAt = now + MATCH_MS;
@@ -45,9 +49,10 @@ export function clean(room, now = Date.now()) {
   return {
     code: room.code, status: room.status, score: room.score,
     timeLeft: room.status === 'playing' ? Math.max(0, Math.ceil((room.endAt - now) / 1000)) : MATCH_MS / 1000,
-    winner: room.winner,
-    players: room.players.map((p) => ({ id: p.id, name: p.name, role: p.role, slot: p.slot, color: p.color, connected: p.connected })),
+    winner: room.winner, winnerRole: room.winnerRole,
+    players: room.players.map((p) => ({ id: p.id, name: p.name, role: p.role, slot: p.slot, color: p.color, connected: p.connected, rematch: p.rematch })),
     robot: room.robot, ant: room.ant, objects: room.objects, event: room.event,
+    createdAt: room.createdAt, daySpeed: room.daySpeed, clock: now, // shared sky clock
   };
 }
 
@@ -56,6 +61,7 @@ export function tick(room, now = Date.now()) {
   if (room.status === 'playing' && now >= room.endAt) {
     room.status = 'ended';
     room.winner = room.players[1].name;
+    room.winnerRole = 'ant';
     room.event = { type: 'escape', at: now };
   }
   return clean(room, now);
@@ -76,7 +82,20 @@ function catchAnt(room, now) {
   if (room.score[0] >= CATCHES_TO_WIN) {
     room.status = 'ended';
     room.winner = room.players[0].name;
+    room.winnerRole = 'robot';
   } else respawnAnt(room);
+}
+
+// After a match, each player asks for a rematch; when both have, the same room starts over
+export function requestRematch(room, player, now = Date.now()) {
+  if (!player || room.status !== 'ended') return;
+  player.rematch = true;
+  if (room.players.length < 2 || !room.players.every((p) => p.rematch && p.connected)) return;
+  for (const p of room.players) p.rematch = false;
+  Object.assign(room, {
+    score: [0, 0], status: 'playing', winner: null, winnerRole: null, endAt: now + MATCH_MS, lastCatchAt: 0, antMoveAt: now,
+    objects: startObjects(), ant: { ...ANT_SPAWNS[0], angle: 0 }, event: { type: 'rematch', at: now },
+  });
 }
 
 const num = (v) => Number.isFinite(Number(v));

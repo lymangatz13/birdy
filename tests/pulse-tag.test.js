@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  createRoomState, joinRoomState, updatePlayer, tick, findPlayer, randomCode, MATCH_MS, CATCHES_TO_WIN,
+  createRoomState, joinRoomState, updatePlayer, requestRematch, tick, findPlayer, randomCode, MATCH_MS, CATCHES_TO_WIN,
 } from '../src/roomlogic.js';
 
 const T0 = 1_000_000;
@@ -66,5 +66,50 @@ describe('pulse tag room rules', () => {
     updatePlayer(room, room.players[0], { ant: { x: before.x + 0.5, z: before.z, angle: 0 } }, T0 + 100);
     expect(room.ant.x).toBe(before.x);
     expect(findPlayer(room, 'nope')).toBeUndefined();
+  });
+  it('default names are Robot and Ant', () => {
+    const room = createRoomState('AB12', '', T0);
+    joinRoomState(room, '', T0);
+    expect(room.players.map((p) => p.name)).toEqual(['Robot', 'Ant']);
+  });
+  it('the winner is decided by role, so equal names cannot both win', () => {
+    const room = createRoomState('AB12', 'Sam', T0);
+    joinRoomState(room, 'Sam', T0);
+    expect(tick(room, T0 + MATCH_MS).winnerRole).toBe('ant');
+  });
+  it('a rematch starts only when both players ask, and resets the match in the same room', () => {
+    const room = started();
+    let now = T0;
+    for (let i = 0; i < CATCHES_TO_WIN; i++) { now += 2000; robotHits(room, now); }
+    expect(room.status).toBe('ended');
+    requestRematch(room, room.players[0], now + 100);
+    expect(room.status).toBe('ended');
+    expect(tick(room, now + 100).players[0].rematch).toBe(true);
+    requestRematch(room, room.players[1], now + 200);
+    const state = tick(room, now + 200);
+    expect(state.status).toBe('playing');
+    expect(state.code).toBe('AB12');
+    expect(state.score).toEqual([0, 0]);
+    expect(state.winnerRole).toBeNull();
+    expect(state.timeLeft).toBe(MATCH_MS / 1000);
+    expect(state.event.type).toBe('rematch');
+    expect(state.players.every((p) => !p.rematch)).toBe(true);
+  });
+  it('no rematch while a match is running or after the rival has left', () => {
+    const room = started();
+    requestRematch(room, room.players[0], T0 + 10);
+    expect(room.players[0].rematch).toBe(false);
+    tick(room, T0 + MATCH_MS);
+    room.players[1].connected = false;
+    requestRematch(room, room.players[0], T0 + MATCH_MS + 10);
+    requestRematch(room, room.players[1], T0 + MATCH_MS + 20);
+    expect(room.status).toBe('ended');
+  });
+  it('the state carries the host sky clock so both players see the same time of day', () => {
+    const room = createRoomState('AB12', 'robo', T0, 60);
+    const state = tick(room, T0 + 5000);
+    expect(state.createdAt).toBe(T0);
+    expect(state.clock).toBe(T0 + 5000);
+    expect(state.daySpeed).toBe(60);
   });
 });
