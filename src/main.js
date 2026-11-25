@@ -251,9 +251,9 @@ function stepAnt(dt) {
   antPos.angle += turn * 2.5 * step * (antSpeed < -0.1 ? -1 : 1);
   const nextX = THREE.MathUtils.clamp(antPos.x + Math.cos(antPos.angle) * antSpeed * step, DESK.x0 + 0.35, DESK.x1 - 0.35);
   const nextZ = THREE.MathUtils.clamp(antPos.z + Math.sin(antPos.angle) * antSpeed * step, DESK.z0 + 0.35, DESK.z1 - 0.35);
-  const blocked = (x, z) => items.some((item) => Math.abs(x - item.pos.x) < item.w / 2 + 0.35 && Math.abs(z - item.pos.z) < item.d / 2 + 0.35);
-  if (!blocked(nextX, nextZ)) { antPos.x = nextX; antPos.z = nextZ; }
-  else antSpeed *= -0.2;
+  // The ant moves freely, including under the mug and laptop
+  antPos.x = nextX;
+  antPos.z = nextZ;
 }
 function syncAntMesh() {
   if (!state?.ant || !humanAnt) return;
