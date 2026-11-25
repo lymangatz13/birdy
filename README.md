@@ -1,8 +1,6 @@
 # Birdy
 
-This repository keeps the original Birdy Three.js room simulation at the repository root. The multiplayer robot-versus-ant adaptation lives in `pulse-tag/`.
-
-Both are published on GitHub Pages by `.github/workflows/deploy.yml` on every push to `main`:
+This repository keeps the original Birdy
 
 - Birdy: https://lymangatz13.github.io/birdy/
 - Pulse Tag: https://lymangatz13.github.io/birdy/pulse-tag/
