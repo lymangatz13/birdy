@@ -1,0 +1,12 @@
+{
+  "name": "pulse-tag",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A real-time two-player robot-versus-ant chase based on Birdy",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  }
+}
