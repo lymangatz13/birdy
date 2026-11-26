@@ -63,9 +63,10 @@ On phones and tablets, on-screen buttons replace the keys.
 How the connection works:
 
 - The game has no server of its own. The two browsers connect directly to each other (WebRTC, through [PeerJS](https://peerjs.com/)). The free public PeerJS service is used only to find the other player.
-- The Giant player's browser runs the match. If Player 1 closes the tab or loses the connection, the match stops and Player 2 sees **CONNECTION LOST**.
+- The Giant player's browser runs the match. If Player 1 closes the tab, the match stops and Player 2 sees **CONNECTION LOST**.
+- If Player 2's connection drops (wifi switch, phone sleep, short outage), both players see **RECONNECTING…** and Player 2 gets back into the same room automatically, in the same slot. After 30 seconds without success, both see **CONNECTION LOST**. The match clock keeps running while Player 2 is away.
 - A room holds two players. A third player who tries to join is refused.
-- Both players need an internet connection. Some strict networks (for example, some company or school networks) block direct browser connections.
+- Both players need an internet connection. Some strict networks (for example, some company, school, mobile or hotel networks) block direct browser connections.
 
 Optional URL parameters:
 

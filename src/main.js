@@ -342,7 +342,7 @@ function updateHud() {
   $('matchStatus').textContent = state.status === 'playing'
     ? (hold ? (mine.role === 'giant' ? 'HOLD ON TIGHT' : 'MASH SPACE TO BREAK FREE') : mine.role === 'giant' ? 'FIND AND GRAB JACK' : 'HIDE FROM THE GIANT')
     : state.status === 'ended' ? 'MATCH COMPLETE' : 'WAITING FOR JACK TO JOIN';
-  $('connectionText').textContent = net.connectionLost ? 'CONNECTION LOST' : state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
+  $('connectionText').textContent = net.connectionLost ? 'CONNECTION LOST' : net.reconnecting ? 'RECONNECTING…' : state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
   $('waiting').classList.toggle('hidden', state.status !== 'waiting');
   $('lockHint').classList.toggle('hidden', !renderer || locked() || state.status === 'ended');
   $('holdMeter').classList.toggle('hidden', !hold);
