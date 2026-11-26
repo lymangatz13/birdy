@@ -1,6 +1,6 @@
-# Birdy: Pulse Tag
+# Birdy: Jack and the Giant Slayer
 
-Pulse Tag is a two-player online chase set in a voxel bedroom. One player is a robot standing at a desk, working two arms to grab a mug and a laptop. The other player is a small red ant running across the desk top. The robot tries to catch the ant by dropping or slamming objects onto it; the ant tries to survive until the clock runs out.
+Jack and the Giant Slayer is a two-player online chase set in a voxel bedroom. One player is a robot standing at a desk, working two arms to grab a mug and a laptop. The other player is a small red ant running across the desk top. The robot tries to catch the ant by dropping or slamming objects onto it; the ant tries to survive until the clock runs out.
 
 Play in the browser: https://lymangatz13.github.io/birdy/
 
