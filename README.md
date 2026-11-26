@@ -1,57 +1,69 @@
 # Birdy: Jack and the Giant Slayer
 
-Jack and the Giant Slayer is a two-player online chase set in a voxel bedroom. One player is a robot standing at a desk, working two arms to grab a mug and a laptop. The other player is a small red ant running across the desk top. The robot tries to catch the ant by dropping or slamming objects onto it; the ant tries to survive until the clock runs out.
+Jack and the Giant Slayer is a two-player online game of hide and seek, set in a 3D voxel bedroom with a giant beanstalk. One player is an ugly 3D giant who walks around the room trying to catch and grab Jack. The other player is Jack, a tiny red stick figure one tenth of the giant's size, who runs, hides and dodges anywhere in the room.
 
 Play in the browser: https://lymangatz13.github.io/birdy/
 
+> **Status:** this README describes the game being built now. The version live at the link above may still be the earlier robot-and-ant game until the new version is released.
+
+## The players
+
+- **Player 1: the Giant.** A large, ugly 3D figure with a head, body, arms and legs. The Giant walks around the room with `W` `A` `S` `D` and reaches out with its arms to grab Jack.
+- **Player 2: Jack.** A tiny stick figure painted red, about 1/10 of the Giant's height. Jack can go anywhere in the room: across the floor, under the bed and the desk, and onto furniture.
+
+## The room
+
+The game takes place in a 3D bedroom with a sloped attic ceiling, modelled on a real room. Jack can use every piece of furniture to hide:
+
+- a bed with pillows and blankets, a nightstand with a lamp, a printer and a mug
+- a window with blinds and a wall air conditioner, two framed diplomas, a fly swatter and a hanging flower vase
+- a desk with monitors, a laptop and clutter, a black-and-white gaming chair and an electric guitar with an amp
+- a mini fridge, a wooden dresser, a radiator, a laundry basket and a pair of shoes
+- a giant beanstalk growing up through the room
+
+The mug and the laptop from the original desk are still there.
+
 ## Rules
 
-- A match has two players: **Player 1 is the Robot** (the player who creates the room) and **Player 2 is the Ant** (the player who joins).
+- **Player 1 is the Giant** (the player who creates the room). **Player 2 is Jack** (the player who joins).
 - A match lasts **3 minutes**.
-- The **Robot wins** by catching the ant **3 times** before time runs out.
-- The **Ant wins** by surviving until the clock reaches zero.
-- A catch counts when a **moving object** (one the robot is holding, or one that is falling) lands on or presses into the ant on the desk top. Dropping the mug or laptop onto the ant, or slamming a held object down onto it, both count.
-- After each catch, the ant reappears at a random spot on the desk, away from where it was caught and not under an object.
-- The ant can move anywhere on the desk top, including under the mug and the laptop. It cannot leave the desk.
-- The desk also has a few background ants that wander around. They do not count towards the score.
+- **The Giant wins** by grabbing Jack and **holding Jack for 10 seconds**. If the Giant lets go before 10 seconds, Jack is free again and the hold timer starts over at the next grab.
+- **Jack wins** by not being held for 10 seconds before the clock runs out.
 - When the match ends, both players can press **REMATCH**. The same room starts a new match once both have pressed it.
 
 ## Controls
 
-### Robot (Player 1)
+### Giant (Player 1)
 
-| Action | Keyboard and mouse | Touch (screens 760 px wide or less) |
-| --- | --- | --- |
-| Aim the active hand | Move the mouse | Touch or drag on the scene |
-| Grab / drop an object | Left click | Tap on the scene |
-| Press down (slam a held object) | Hold `Space` or the right mouse button | Hold the **PRESS** button |
-| Select left / right arm | `Q` / `E` | **LEFT ARM** / **RIGHT ARM** buttons |
-| Turn left / right | `A` / `D` or `←` / `→` | Not available |
-| Look up / down | `W` / `S` or `↑` / `↓` | Not available |
+| Action | Keyboard and mouse |
+| --- | --- |
+| Walk forward / back | `W` / `S` |
+| Turn left / right | `A` / `D` |
+| Aim the active hand | Move the mouse |
+| Grab / let go | Left click |
+| Select left / right arm | `Q` / `E` |
 
-The active arm's joint is highlighted in orange. Click an object within reach to make the active hand reach for it and pick it up; click again to drop it. An object that is out of reach shows a message instead.
+### Jack (Player 2)
 
-### Ant (Player 2)
+| Action | Keyboard |
+| --- | --- |
+| Run forward / back | `W` / `S` |
+| Turn left / right | `A` / `D` |
+| Jump (to climb onto furniture) | `Space` |
 
-| Action | Keyboard | Touch (screens 760 px wide or less) |
-| --- | --- | --- |
-| Accelerate | `W` or `↑` | **▲** button |
-| Brake / reverse | `S` or `↓` | **▼** button |
-| Steer left / right | `A` / `D` or `←` / `→` | **◀** / **▶** buttons |
-
-The ant keeps some speed when you let go and slows down gradually.
+On phones and tablets, on-screen buttons replace the keys.
 
 ## How to play online
 
 1. Open https://lymangatz13.github.io/birdy/.
-2. **Player 1:** enter a name (optional) and press **CREATE A ROOM**. A 4-character room code appears.
+2. **Player 1 (Giant):** enter a name (optional) and press **CREATE A ROOM**. A 4-character room code appears.
 3. Send the code to Player 2, or press **COPY LINK** and send the link (it opens the game with the code already filled in).
-4. **Player 2:** open the game, enter the code (or open the link) and press **JOIN**. The match starts as soon as Player 2 joins.
+4. **Player 2 (Jack):** open the game, enter the code (or open the link) and press **JOIN**. The match starts as soon as Jack joins.
 
 How the connection works:
 
 - The game has no server of its own. The two browsers connect directly to each other (WebRTC, through [PeerJS](https://peerjs.com/)). The free public PeerJS service is used only to find the other player.
-- The Robot player's browser runs the match. If Player 1 closes the tab or loses the connection, the match stops and Player 2 sees **CONNECTION LOST**.
+- The Giant player's browser runs the match. If Player 1 closes the tab or loses the connection, the match stops and Player 2 sees **CONNECTION LOST**.
 - A room holds two players. A third player who tries to join is refused.
 - Both players need an internet connection. Some strict networks (for example, some company or school networks) block direct browser connections.
 
@@ -80,10 +92,10 @@ To test online play locally, open the dev server URL in two browser windows: cre
 | --- | --- |
 | `index.html` | Lobby and game screens |
 | `src/main.js` | Rendering, input and the game loop |
-| `src/roomlogic.js` | Match rules: timer, catches, scoring, rematch (no DOM or network) |
+| `src/roomlogic.js` | Match rules: timer, win conditions, rematch (no DOM or network) |
 | `src/net.js` | Peer-to-peer connection with PeerJS |
 | `src/room.js` | The voxel bedroom and desk |
-| `src/robot.js` | Robot body and arm movement |
+| `src/robot.js` | Arm movement (being replaced by the Giant) |
 | `src/ants.js` | Background ants |
 | `src/items.js` | The mug and laptop, and how they fall |
 | `src/sky.js` | Day/night cycle |
