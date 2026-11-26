@@ -18,12 +18,10 @@ class FakeConn extends Emitter {
   }
 }
 let nextId = 0;
-const lastOptions = [];
 class FakePeer extends Emitter {
   constructor(id, options) {
     super();
     if (typeof id === 'object') { options = id; id = undefined; }
-    lastOptions.push(options);
     this.id = id || `guest-${nextId++}`; this.destroyed = false; this.disconnected = false;
     peers.set(this.id, this);
     queueMicrotask(() => this.emit('open', this.id));
@@ -50,28 +48,8 @@ const { Net } = await import('../src/net.js');
 const settle = async (ms) => { await vi.advanceTimersByTimeAsync(ms); };
 
 describe('net', () => {
-  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] }); peers.clear(); lastOptions.length = 0; });
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] }); peers.clear(); });
   afterEach(() => { vi.useRealTimers(); });
-
-  it('keeps the PeerJS default STUN/TURN servers when no TURN is configured', async () => {
-    const host = new Net();
-    await host.createRoom('robo');
-    const ice = lastOptions[0].config.iceServers;
-    expect(ice.some((s) => String(s.urls).includes('stun.l.google.com'))).toBe(true);
-    expect(ice.some((s) => String(s.urls).includes('turn.peerjs.com'))).toBe(true);
-  });
-
-  it('adds a configured TURN server on port 443 to the defaults', async () => {
-    vi.stubEnv('VITE_TURN_URLS', 'turns:turn.example.com:443?transport=tcp');
-    vi.stubEnv('VITE_TURN_USERNAME', 'u');
-    vi.stubEnv('VITE_TURN_CREDENTIAL', 'p');
-    try {
-      await new Net().createRoom('robo');
-      const ice = lastOptions[0].config.iceServers;
-      expect(ice).toContainEqual({ urls: ['turns:turn.example.com:443?transport=tcp'], username: 'u', credential: 'p' });
-      expect(ice.some((s) => String(s.urls).includes('stun.l.google.com'))).toBe(true);
-    } finally { vi.unstubAllEnvs(); }
-  });
 
   it('a dropped ant player rejoins the same room and keeps its slot', async () => {
     const host = new Net(), guest = new Net();

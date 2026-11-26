@@ -4,12 +4,6 @@
 // PeerJS is used only to find the other player;
 // by default it uses the free public PeerJS service. For testing, ?peerHost=&peerPort=&peerPath=
 // &peerSecure=0|1 point it at another PeerJS server.
-// TURN: players on strict networks (school, office, mobile, hotel) often cannot connect directly
-// and need a relay. Set at build time (see README):
-//   VITE_TURN_URLS        comma-separated, e.g. turns:turn.example.com:443?transport=tcp
-//   VITE_TURN_USERNAME / VITE_TURN_CREDENTIAL
-//   VITE_TURN_CREDENTIALS_URL  optional; a URL that returns a JSON array of iceServers (fetched once)
-// Without them, PeerJS's own defaults (Google STUN + free PeerJS TURN on port 3478) are used.
 import { Peer } from 'peerjs';
 import { createRoomState, joinRoomState, updatePlayer, requestRematch, tick, findPlayer, randomCode } from './roomlogic.js';
 
@@ -21,32 +15,10 @@ const REJOIN_FOR = 30000;   // how long a dropped ant player keeps trying to get
 const REJOIN_RETRY = 2000;  // pause between rejoin attempts
 const REJOIN_ATTEMPT = 6000; // one rejoin attempt gives up after this long
 
-// PeerJS 1.5 defaults, kept so an extra TURN server is added rather than replacing them
-const DEFAULT_ICE = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
-];
-const env = import.meta.env || {};
-let fetchedIce = null;
-
-async function iceServers() {
-  const servers = [...DEFAULT_ICE];
-  const urls = String(env.VITE_TURN_URLS || '').split(',').map((u) => u.trim()).filter(Boolean);
-  if (urls.length) servers.push({ urls, username: env.VITE_TURN_USERNAME || '', credential: env.VITE_TURN_CREDENTIAL || '' });
-  if (env.VITE_TURN_CREDENTIALS_URL) {
-    try {
-      fetchedIce ??= await fetch(env.VITE_TURN_CREDENTIALS_URL).then((r) => (r.ok ? r.json() : []));
-      if (Array.isArray(fetchedIce)) servers.push(...fetchedIce);
-    } catch { fetchedIce = null; } // relay unavailable: fall back to the defaults, try again next time
-  }
-  return servers;
-}
-
-async function peerOptions() {
+function peerOptions() {
   const q = new URLSearchParams(location.search);
-  const config = { iceServers: await iceServers() };
-  if (!q.get('peerHost')) return { debug: 0, config };
-  return { host: q.get('peerHost'), port: Number(q.get('peerPort') || 9000), path: q.get('peerPath') || '/', secure: q.get('peerSecure') === '1', debug: 0, config };
+  if (!q.get('peerHost')) return { debug: 0 };
+  return { host: q.get('peerHost'), port: Number(q.get('peerPort') || 9000), path: q.get('peerPath') || '/', secure: q.get('peerSecure') === '1', debug: 0 };
 }
 
 const friendly = (error) => new Error(
@@ -55,10 +27,9 @@ const friendly = (error) => new Error(
     : error?.type === 'browser-incompatible' ? 'This browser does not support direct connections (WebRTC).'
     : error?.message || 'Could not connect.');
 
-async function openPeer(id) {
-  const options = await peerOptions();
+function openPeer(id) {
   return new Promise((resolve, reject) => {
-    const peer = id ? new Peer(id, options) : new Peer(options);
+    const peer = id ? new Peer(id, peerOptions()) : new Peer(peerOptions());
     const done = () => { clearTimeout(timer); peer.off('open', onOpen); peer.off('error', onError); };
     const onOpen = () => { done(); resolve(peer); };
     const onError = (error) => { done(); peer.destroy(); reject(error); };

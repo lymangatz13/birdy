@@ -25,12 +25,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-        env:
-          # Optional TURN relay for players on strict networks (see README, "TURN server")
-          VITE_TURN_URLS: ${{ vars.TURN_URLS }}
-          VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
-          VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
-          VITE_TURN_CREDENTIALS_URL: ${{ secrets.TURN_CREDENTIALS_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -66,7 +66,7 @@ How the connection works:
 - The Giant player's browser runs the match. If Player 1 closes the tab, the match stops and Player 2 sees **CONNECTION LOST**.
 - If Player 2's connection drops (wifi switch, phone sleep, short outage), both players see **RECONNECTING…** and Player 2 gets back into the same room automatically, in the same slot. After 30 seconds without success, both see **CONNECTION LOST**. The match clock keeps running while Player 2 is away.
 - A room holds two players. A third player who tries to join is refused.
-- Both players need an internet connection. Some strict networks (for example, some company, school, mobile or hotel networks) block direct browser connections. A TURN relay on port 443 gets around most of these (see "TURN server" below).
+- Both players need an internet connection. Some strict networks (for example, some company, school, mobile or hotel networks) block direct browser connections.
 
 Optional URL parameters:
 
@@ -110,18 +110,5 @@ Built with [Three.js](https://threejs.org/), [PeerJS](https://peerjs.com/), [Vit
 The workflow `.github/workflows/deploy.yml` deploys the site on every push to `main` (it can also be started by hand from the **Actions** tab). It runs `npm ci`, `npm test` and `npm run build`, then publishes `dist/` to GitHub Pages. If the tests fail, nothing is deployed.
 
 In the repository settings, **Settings → Pages → Source** must be set to **GitHub Actions**.
-
-### TURN server
-
-Without a TURN server, the game uses PeerJS's free relay on port 3478, which many networks block. To add a relay on port 443, create an account with a TURN provider (for example Metered, Cloudflare Realtime, Twilio or Xirsys) or run [coturn](https://github.com/coturn/coturn), then set these in **Settings → Secrets and variables → Actions**:
-
-| Name | Kind | Example |
-| --- | --- | --- |
-| `TURN_URLS` | Variable | `turn:turn.example.com:443?transport=tcp,turns:turn.example.com:443?transport=tcp` |
-| `TURN_USERNAME` | Secret | provider username |
-| `TURN_CREDENTIAL` | Secret | provider password |
-| `TURN_CREDENTIALS_URL` | Secret (optional) | a URL that returns a JSON array of `iceServers`, for providers that issue credentials by API |
-
-The deploy workflow passes them to the build as `VITE_TURN_*`. For a local build, set the same `VITE_TURN_*` environment variables. Anything set here ends up in the public site's JavaScript, so use a provider account with usage limits.
 
 `vite.config.js` sets `base: './'`, so the built site works from any path, including `https://<user>.github.io/birdy/`.
