@@ -1,28 +1,37 @@
 import * as THREE from 'three';
-import { Room, ROBOT_EYE, ROBOT_YAW, DESK } from './room.js';
+import { Room, DESK, GIANT_START, JACK_START, SY } from './room.js';
 import { Sky, hours, sunDir, smoothstep } from './sky.js';
-import { Robot, PICK_SIDE, reachLimit } from './robot.js';
-import { makeMug, makeLaptop, stepItems, slideOffEdges } from './items.js';
-import { Colony, AntView } from './ants.js';
+import { GiantModel, GIANT, stepGiant, canStand, holdPoint } from './giant.js';
+import { JackModel, JACK, stepJack, jackBlocked } from './jack.js';
+import { inGrabRange, HOLD_MS } from './roomlogic.js';
+import { deskItems } from './items.js';
 import { Net } from './net.js';
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const playerName = $('playerName'), roomCodeInput = $('roomCode');
-let code = null, playerId = null, mine = null, state = null, renderer, scene, camera, room, sky, robot, colony, antView, humanAnt, items;
-let active = false, lastTime = 0, lastSend = 0, lastPoll = 0, antPos = { x: 35.5, z: 15.5, angle: 0 }, antSpeed = 0, displayedAnt = new THREE.Vector3(35.5, 9.03, 15.5);
-let keys = new Set(), mouse = new THREE.Vector2(0, -0.2), pressMouse = false, eventAt = 0, hintUntil = 0, hint = '', moveBusy = false, pollBusy = false;
-let antMarker = null, clockOffset = 0, rematchAsked = false;
-const BACKGROUND_ANTS = 30;
+let code = null, playerId = null, mine = null, state = null, renderer, scene, camera, room, sky, items, giantModel, jackModel;
+let active = false, lastTime = 0, lastSend = 0, lastPoll = 0, eventAt = 0, hintUntil = 0, hint = '', moveBusy = false, pollBusy = false;
+let clockOffset = 0, rematchAsked = false;
+const keys = new Set();
+// The giant (local when playing the giant, otherwise shown from the host's state)
+const giant = { x: GIANT_START.x, z: GIANT_START.z, yaw: GIANT_START.yaw, pitch: -0.25, crouch: false, speed: 0 };
+let reachTarget = null, reachUntil = 0, grabAsk = false, lastGrab = 0;
+// Jack (local when playing Jack)
+const jack = { x: JACK_START.x, y: JACK_START.y, z: JACK_START.z, vy: 0, grounded: true, yaw: 0, speed: 0 };
+let jackCam = { yaw: 0, pitch: -0.3 }, presses = 0, wasHeld = false;
+const shownJack = new THREE.Vector3(JACK_START.x, JACK_START.y, JACK_START.z), shownGiant = new THREE.Vector3(GIANT_START.x, 0, GIANT_START.z);
+let shownGiantYaw = GIANT_START.yaw, shownJackYaw = 0;
 const daySpeed = Number(query.get('speed')) || 1;
+
 // Player names shown as "NAME · ROLE", or just the role when the name is the default
 const label = (player, role) => {
   const name = (player?.name || '').trim();
   return !name || name.toLowerCase() === role.toLowerCase() ? role.toUpperCase() : `${name.toUpperCase()} · ${role.toUpperCase()}`;
 };
 const FOOTERS = {
-  robot: '<span>MOUSE AIM</span><span>CLICK GRAB/DROP</span><span><kbd>SPACE</kbd>/RIGHT-CLICK PRESS</span><span><kbd>Q</kbd>/<kbd>E</kbd> ARM</span><span><kbd>A</kbd>/<kbd>D</kbd> TURN</span><span><kbd>W</kbd>/<kbd>S</kbd> LOOK</span><span class="tip">Drop or slam an object onto the red ant.</span>',
-  ant: '<span><kbd>W</kbd> ACCELERATE</span><span><kbd>S</kbd> BRAKE/REVERSE</span><span><kbd>A</kbd>/<kbd>D</kbd> STEER</span><span class="tip">Stay clear of falling and slammed objects.</span>',
+  giant: '<span>MOUSE LOOK</span><span><kbd>W</kbd>/<kbd>S</kbd> WALK</span><span><kbd>A</kbd>/<kbd>D</kbd> STEP</span><span><kbd>C</kbd> CROUCH</span><span>CLICK GRAB</span><span class="tip">Find Jack, grab him and hold on for 10 seconds.</span>',
+  jack: '<span>MOUSE LOOK</span><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> RUN</span><span><kbd>SPACE</kbd> JUMP</span><span>HELD: MASH <kbd>SPACE</kbd></span><span class="tip">Hide from the giant until time runs out.</span>',
 };
 
 // Players connect directly to each other; the room creator's browser hosts the match (net.js)
@@ -34,15 +43,16 @@ function connect(result) {
   state = result.state;
   mine = state.players.find((p) => p.id === playerId);
   code = state.code;
-  antPos = { x: state.ant.x, z: state.ant.z, angle: state.ant.angle };
   $('lobby').classList.add('hidden');
   $('game').classList.remove('hidden');
   $('roomLabel').textContent = code;
   $('bigCode').textContent = code;
   $('gameFooter').innerHTML = FOOTERS[mine.role];
-  $('antControls').classList.toggle('hidden', mine.role !== 'ant');
-  $('robotControls').classList.toggle('hidden', mine.role !== 'robot');
+  $('giantControls').classList.toggle('hidden', mine.role !== 'giant');
+  $('jackControls').classList.toggle('hidden', mine.role !== 'jack');
+  $('crosshair').classList.toggle('hidden', mine.role !== 'giant');
   buildScene();
+  resetPositions();
   updateHud();
   active = true;
   lastTime = performance.now();
@@ -51,7 +61,7 @@ function connect(result) {
 $('createBtn').onclick = async () => {
   if (connecting) return;
   connecting = true; showError('Creating room…');
-  try { const result = await net.createRoom(playerName.value.trim() || 'Robot', daySpeed); showError(''); connect(result); }
+  try { const result = await net.createRoom(playerName.value.trim() || 'Giant', daySpeed); showError(''); connect(result); }
   catch (error) { showError(error.message); }
   finally { connecting = false; }
 };
@@ -61,7 +71,7 @@ $('joinBtn').onclick = async () => {
   if (codeValue.length !== 4) return showError('Enter the 4-character room code.');
   if (connecting) return;
   connecting = true; showError('Connecting to room…');
-  try { const result = await net.joinRoom(codeValue, playerName.value.trim() || 'Ant'); showError(''); connect(result); }
+  try { const result = await net.joinRoom(codeValue, playerName.value.trim() || 'Jack'); showError(''); connect(result); }
   catch (error) { showError(error.message); }
   finally { connecting = false; }
 };
@@ -87,48 +97,32 @@ function buildScene() {
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.setSize(host.clientWidth, host.clientHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   host.appendChild(renderer.domElement);
   scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0, 70, 128);
+  scene.fog = new THREE.Fog(0, 110, 260);
   camera = new THREE.PerspectiveCamera(70, host.clientWidth / Math.max(1, host.clientHeight), 0.05, 1000);
   room = new Room(scene);
   sky = new Sky(scene);
   sky.hemi.groundColor.set(0xd8c8b4);
-  items = [makeLaptop().place(37, DESK.top, 19.5), makeMug().place(34.5, DESK.top, 24.5)];
+  items = deskItems(DESK);
   for (const item of items) scene.add(item.group);
-  robot = new Robot(scene, ROBOT_EYE, ROBOT_YAW);
-  colony = new Colony(BACKGROUND_ANTS, items);
-  antView = new AntView(scene, colony);
-  humanAnt = new THREE.Mesh(antView.mesh.geometry, new THREE.MeshLambertMaterial({ color: 0xff4d6d }));
-  humanAnt.visible = mine.role !== 'ant';
-  humanAnt.frustumCulled = false;
-  scene.add(humanAnt);
-  if (mine.role === 'robot') {
-    // Marker so the robot can pick out the player ant among the background ants
-    const red = new THREE.MeshBasicMaterial({ color: 0xff4d6d });
-    antMarker = new THREE.Group();
-    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.7, 4), red);
-    arrow.rotation.x = Math.PI;
-    arrow.name = 'arrow';
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff4d6d, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }));
-    ring.rotation.x = -Math.PI / 2;
-    ring.name = 'ring';
-    antMarker.add(arrow, ring);
-    scene.add(antMarker);
-  }
-  $('scene').addEventListener('mousemove', onMouseMove);
-  $('scene').addEventListener('pointermove', onMouseMove);
-  $('scene').addEventListener('touchstart', onTouchAim, { passive: false });
-  $('scene').addEventListener('touchmove', onTouchAim, { passive: false });
-  $('scene').addEventListener('mousedown', onMouseDown);
-  $('scene').addEventListener('mouseup', onMouseUp);
-  $('scene').addEventListener('contextmenu', (event) => event.preventDefault());
+  giantModel = new GiantModel(scene);
+  jackModel = new JackModel(scene);
+  const canvas = renderer.domElement;
+  canvas.addEventListener('click', onCanvasClick);
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('pointerlockchange', updateHud);
+  host.addEventListener('touchstart', onTouch, { passive: false });
+  host.addEventListener('touchmove', onTouch, { passive: false });
+  host.addEventListener('touchend', onTouchEnd);
   window.addEventListener('resize', resize);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', () => { keys.clear(); pressMouse = false; });
+  window.addEventListener('blur', () => keys.clear());
   bindMobileControls();
-  syncAntMesh();
 }
 function resize() {
   if (!renderer) return;
@@ -137,256 +131,278 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(host.clientWidth, host.clientHeight);
 }
-function onMouseMove(event) {
-  const rect = $('scene').getBoundingClientRect();
-  mouse.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+
+// ---- Input -------------------------------------------------------------------------------
+const locked = () => document.pointerLockElement === renderer?.domElement;
+function look(dx, dy) {
+  if (mine.role === 'giant') {
+    giant.yaw -= dx * 0.0026;
+    giant.pitch = THREE.MathUtils.clamp(giant.pitch - dy * 0.0022, -1.25, 0.9);
+  } else {
+    jackCam.yaw -= dx * 0.0026;
+    jackCam.pitch = THREE.MathUtils.clamp(jackCam.pitch - dy * 0.0022, -1.2, 1.0);
+  }
 }
-function onTouchAim(event) {
+function onCanvasClick() {
+  if (!locked()) { renderer.domElement.requestPointerLock?.(); return; }
+  if (mine.role === 'giant') tryGrab();
+}
+function onMouseMove(event) { if (locked()) look(event.movementX, event.movementY); }
+// Touch: drag on the room to look around; a quick tap grabs (giant)
+let touchStart = null, touchLast = null;
+function onTouch(event) {
+  if (event.target.closest('button')) return;
   event.preventDefault();
-  const touch = event.touches[0] || event.changedTouches[0];
-  if (touch) onMouseMove(touch);
-  if (event.type === 'touchstart' && mine?.role === 'robot') onMouseDown({ button: 0 });
+  const t = event.changedTouches[0];
+  if (event.type === 'touchstart') { touchStart = { x: t.clientX, y: t.clientY, at: performance.now() }; touchLast = { x: t.clientX, y: t.clientY }; return; }
+  if (!touchLast) return;
+  look((t.clientX - touchLast.x) * 1.6, (t.clientY - touchLast.y) * 1.6);
+  touchLast = { x: t.clientX, y: t.clientY };
+}
+function onTouchEnd(event) {
+  const t = event.changedTouches[0];
+  if (touchStart && t && performance.now() - touchStart.at < 250 && Math.hypot(t.clientX - touchStart.x, t.clientY - touchStart.y) < 12 && mine?.role === 'giant') tryGrab();
+  touchStart = touchLast = null;
 }
 function bindMobileControls() {
   document.querySelectorAll('[data-key]').forEach((button) => {
     const key = button.dataset.key;
-    button.addEventListener('pointerdown', (event) => { event.preventDefault(); keys.add(key); button.setPointerCapture(event.pointerId); });
+    button.addEventListener('pointerdown', (event) => { event.preventDefault(); keys.add(key); onPress(key); button.setPointerCapture(event.pointerId); });
     for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(name, () => keys.delete(key));
   });
-  document.querySelectorAll('[data-arm]').forEach((button) => button.addEventListener('pointerdown', (event) => {
-    event.preventDefault(); if (mine?.role === 'robot') robot.active = Number(button.dataset.arm);
-  }));
-  const press = $('pressControl');
-  press.addEventListener('pointerdown', (event) => { event.preventDefault(); pressMouse = true; press.setPointerCapture(event.pointerId); });
-  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) press.addEventListener(name, () => pressMouse = false);
+  $('grabControl').addEventListener('pointerdown', (event) => { event.preventDefault(); tryGrab(); });
 }
 function onKeyDown(event) {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
+  if (!event.repeat) onPress(event.code);
   keys.add(event.code);
-  if (mine?.role === 'robot') {
-    if (event.code === 'KeyQ') robot.active = 0;
-    if (event.code === 'KeyE') robot.active = 1;
-  }
 }
 function onKeyUp(event) { keys.delete(event.code); }
+// Each fresh press of Space while held is one struggle
+function onPress(code) { if (code === 'Space' && mine?.role === 'jack' && state?.hold) presses++; }
+const axis = (plus, minus) => (keys.has(plus[0]) || keys.has(plus[1]) ? 1 : 0) - (keys.has(minus[0]) || keys.has(minus[1]) ? 1 : 0);
+
+// ---- Giant -------------------------------------------------------------------------------
+const giantEye = () => GIANT.eye + (GIANT.crouchEye - GIANT.eye) * giantModel.crouch;
+const giantForward = () => new THREE.Vector3(Math.sin(giant.yaw) * Math.cos(giant.pitch), Math.sin(giant.pitch), Math.cos(giant.yaw) * Math.cos(giant.pitch));
 const raycaster = new THREE.Raycaster();
-const downRay = new THREE.Raycaster();
-const DOWN = new THREE.Vector3(0, -1, 0);
-const aimTargets = () => [room.mesh, room.glow, humanAnt, ...items.filter((item) => !item.held).map((item) => item.group)];
-function onMouseDown(event) {
-  if (mine?.role !== 'robot') return;
-  if (event.button === 2) { pressMouse = true; return; }
-  if (event.button !== 0) return;
-  const arm = robot.activeArm;
-  if (arm.reachFor) { arm.reachFor = null; return; }
-  if (arm.held) {
-    arm.held.held = null;
-    arm.held.vy = 0;
-    slideOffEdges(arm.held, room.solidAt);
-    arm.held = null;
+function aimHit() {
+  raycaster.set(camera.position, giantForward());
+  raycaster.far = 80;
+  const hit = raycaster.intersectObjects([room.mesh, ...items.map((i) => i.group), jackModel.group], true)[0];
+  if (!hit) return { point: camera.position.clone().addScaledVector(giantForward(), 20), jack: false };
+  let o = hit.object, isJack = false;
+  while (o) { if (o === jackModel.group) isJack = true; o = o.parent; }
+  return { point: hit.point, jack: isJack };
+}
+// Reach for whatever is under the crosshair; it is a catch if that is Jack and he is within reach
+function tryGrab() {
+  if (mine?.role !== 'giant' || state?.status !== 'playing' || state.hold) return;
+  const now = performance.now();
+  if (now - lastGrab < 700) return;
+  lastGrab = now;
+  const aim = aimHit();
+  reachTarget = aim.point;
+  reachUntil = now + 450;
+  const inReach = inGrabRange(giant, state.jack);
+  if (aim.jack && inReach && !state.free) grabAsk = true;
+  else if (aim.jack && !inReach) { hint = 'Jack is out of reach. Get closer.'; hintUntil = now + 1500; }
+  else if (aim.jack && state.free) { hint = 'Jack is too slippery right now!'; hintUntil = now + 1200; }
+}
+function stepLocalGiant(dt) {
+  const wantCrouch = keys.has('KeyC') || keys.has('ControlLeft');
+  giant.crouch = wantCrouch || !canStand(giant, room.giantSolidAt);
+  const before = { x: giant.x, z: giant.z };
+  stepGiant(giant, { forward: axis(['KeyW', 'ArrowUp'], ['KeyS', 'ArrowDown']), strafe: axis(['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']) }, giant.crouch, dt, room.giantSolidAt);
+  giant.speed = Math.min(1, Math.hypot(giant.x - before.x, giant.z - before.z) / dt / GIANT.walk);
+  if (state.hold) reachTarget = holdPoint(giant, giant.crouch);
+  else if (performance.now() > reachUntil) reachTarget = null;
+}
+function giantCamera() {
+  const pivot = new THREE.Vector3(shownGiant.x, giantEye() + 0.6, shownGiant.z);
+  const f = giantForward();
+  const right = new THREE.Vector3(-Math.cos(giant.yaw), 0, Math.sin(giant.yaw));
+  // Over the right shoulder, a little above the head, so the crosshair is not behind the giant
+  const shoulder = clearPath(pivot, pivot.clone().addScaledVector(right, 5).add(new THREE.Vector3(0, 2.5, 0)), 0.5);
+  camera.position.copy(clearPath(shoulder, shoulder.clone().addScaledVector(f, -10), 0.5));
+  camera.lookAt(camera.position.clone().add(f));
+  // In tight spots the camera ends up close to the giant; hide the body so it does not block the view
+  giantModel.group.visible = camera.position.distanceTo(pivot) > 5.5;
+}
+
+// ---- Jack --------------------------------------------------------------------------------
+const boxes = () => items.map((i) => i.box);
+function stepLocalJack(dt) {
+  if (state.hold) {
+    jack.x = state.jack.x; jack.y = state.jack.y; jack.z = state.jack.z; jack.vy = 0; jack.speed = 0;
+    wasHeld = true;
     return;
   }
-  raycaster.setFromCamera(mouse, camera);
-  const hit = raycaster.intersectObjects(aimTargets(), true)[0];
-  const top = (item) => item.pos.clone().setY(item.pos.y + item.h + 0.4);
-  const near = (item) => top(item).distanceTo(arm.hand);
-  const shoulder = robot.shoulder(arm.side);
-  const reachable = (item) => {
-    const v = top(item).sub(shoulder);
-    return v.length() <= reachLimit(v.clone().normalize()) && Math.hypot(item.pos.x - robot.eye.x, item.pos.z - robot.eye.z) <= PICK_SIDE;
-  };
-  let pick = hit?.object.userData.item;
-  if (pick && (pick.held || !reachable(pick))) {
-    if (!pick.held) { hint = `${pick.name} is out of reach`; hintUntil = performance.now() + 1500; }
-    pick = null;
-  }
-  if (!pick) pick = items.filter((item) => !item.held && near(item) < 2.5).sort((a, b) => near(a) - near(b))[0];
-  if (pick) arm.reachFor = pick;
+  if (wasHeld) { wasHeld = false; dropFree(); }
+  if (state.status !== 'playing') { jack.speed = 0; return; }
+  const f = axis(['KeyW', 'ArrowUp'], ['KeyS', 'ArrowDown']), s = axis(['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']);
+  const fx = Math.sin(jackCam.yaw), fz = Math.cos(jackCam.yaw);
+  const move = new THREE.Vector2(fx * f - fz * s, fz * f + fx * s);
+  if (move.lengthSq() > 1) move.normalize();
+  const before = { x: jack.x, z: jack.z };
+  stepJack(jack, { x: move.x, z: move.y }, keys.has('Space'), dt, room.solidAt, boxes());
+  jack.speed = Math.min(1, Math.hypot(jack.x - before.x, jack.z - before.z) / dt / JACK.speed);
+  if (move.lengthSq() > 0.01) jack.yaw = lerpAngle(jack.yaw, Math.atan2(move.x, move.y), Math.min(1, dt * 14));
 }
-function onMouseUp(event) { if (event.button === 2) pressMouse = false; }
-
-function aimActiveHand() {
-  const arm = robot.activeArm;
-  if (arm.reachFor) return;
-  raycaster.setFromCamera(mouse, camera);
-  const hit = raycaster.intersectObjects(aimTargets(), true)[0];
-  const pressing = pressMouse || keys.has('Space');
-  const point = hit
-    ? hit.point.clone().addScaledVector(hit.face.normal, pressing ? 0.1 : 0.9)
-    : raycaster.ray.origin.clone().addScaledVector(raycaster.ray.direction, 9);
-  if (!pressing) {
-    downRay.set(new THREE.Vector3(point.x, point.y + 0.5, point.z), DOWN);
-    const below = downRay.intersectObjects(aimTargets(), true)[0];
-    if (below) point.y = Math.max(point.y, below.point.y + 0.9);
-  }
-  // Pressing while holding an object slams it down onto the surface
-  if (arm.held) point.y += pressing ? arm.held.h - 0.65 : arm.held.h;
-  arm.target.copy(point).add(new THREE.Vector3(0, 0.4, 0));
+// Dropped from the giant's fist: find open space nearby so Jack does not end up inside furniture
+function dropFree() {
+  jack.vy = 0; jack.grounded = false;
+  for (let up = 0; up < 12; up++) if (!jackBlocked(jack.x, jack.y + up * 0.5, jack.z, room.solidAt, boxes())) { jack.y += up * 0.5; return; }
+  Object.assign(jack, { x: state.giant.x, y: 1, z: state.giant.z });
+}
+function jackCamera() {
+  const pivot = new THREE.Vector3(shownJack.x, shownJack.y + 1.7, shownJack.z);
+  const f = new THREE.Vector3(Math.sin(jackCam.yaw) * Math.cos(jackCam.pitch), Math.sin(jackCam.pitch), Math.cos(jackCam.yaw) * Math.cos(jackCam.pitch));
+  const want = pivot.clone().addScaledVector(f, state?.hold ? -9 : -4.2).add(new THREE.Vector3(0, 0.4, 0));
+  camera.position.copy(clearPath(pivot, want, 0.25));
+  camera.lookAt(pivot.clone().addScaledVector(f, 2));
 }
 
-function localRobotSync() {
-  return {
-    yaw: robot.yaw, pitch: robot.pitch, active: robot.active, pressing: pressMouse || keys.has('Space'),
-    hands: robot.arms.map((arm) => ({ x: arm.hand.x, y: arm.hand.y, z: arm.hand.z, tipX: arm.tip.x, tipY: arm.tip.y, tipZ: arm.tip.z })),
-    objects: items.map((item) => ({ x: item.pos.x, y: item.pos.y, z: item.pos.z, w: item.w, d: item.d, h: item.h, held: Boolean(item.held) }))
-  };
-}
-function applyRemoteRobot() {
-  if (!state?.robot || mine.role === 'robot') return;
-  robot.yaw = state.robot.yaw;
-  robot.pitch = state.robot.pitch;
-  robot.active = state.robot.active;
-  for (const [i, hand] of state.robot.hands.entries()) {
-    const arm = robot.arms[i];
-    if (arm && hand) arm.target.set(hand.x, hand.y, hand.z);
+// Walk from a towards b through the voxels, stopping short of the first solid block
+function clearPath(a, b, margin) {
+  const d = b.clone().sub(a), len = d.length(), step = 0.1;
+  d.normalize();
+  let t = 0;
+  for (; t <= len; t += step) {
+    const p = a.clone().addScaledVector(d, t);
+    if (room.solidAt(p.x, p.y, p.z) || p.y > SY - 1.2) break;
   }
+  return a.clone().addScaledVector(d, Math.max(0, Math.min(len, t - margin)));
 }
-function stepAnt(dt) {
-  if (mine.role !== 'ant' || state.status !== 'playing') return;
-  const throttle = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
-  const turn = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
-  const step = Math.min(dt, 0.05);
-  antSpeed = THREE.MathUtils.clamp(antSpeed + throttle * 10 * step, -3.2, 6.8);
-  if (!throttle) antSpeed *= Math.exp(-1.25 * step);
-  antPos.angle += turn * 2.5 * step * (antSpeed < -0.1 ? -1 : 1);
-  const nextX = THREE.MathUtils.clamp(antPos.x + Math.cos(antPos.angle) * antSpeed * step, DESK.x0 + 0.35, DESK.x1 - 0.35);
-  const nextZ = THREE.MathUtils.clamp(antPos.z + Math.sin(antPos.angle) * antSpeed * step, DESK.z0 + 0.35, DESK.z1 - 0.35);
-  // The ant moves freely, including under the mug and laptop
-  antPos.x = nextX;
-  antPos.z = nextZ;
+const lerpAngle = (a, b, t) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
+
+// ---- Syncing ------------------------------------------------------------------------------
+function resetPositions() {
+  Object.assign(giant, { x: state.giant.x, z: state.giant.z, yaw: state.giant.yaw, pitch: state.giant.pitch, crouch: false });
+  Object.assign(jack, { x: state.jack.x, y: state.jack.y, z: state.jack.z, vy: 0, grounded: true, yaw: state.jack.yaw });
+  jackCam = { yaw: state.jack.yaw, pitch: -0.3 };
+  shownJack.set(jack.x, jack.y, jack.z);
+  shownGiant.set(giant.x, 0, giant.z);
+  shownGiantYaw = giant.yaw;
+  reachTarget = null; grabAsk = false; wasHeld = false;
 }
-function syncAntMesh() {
-  if (!state?.ant || !humanAnt) return;
-  const target = state.ant;
-  displayedAnt.lerp(new THREE.Vector3(target.x, DESK.top + 0.03, target.z), 0.35);
-  humanAnt.position.copy(displayedAnt);
-  humanAnt.rotation.y = -(target.angle || 0);
-  humanAnt.position.y += Math.abs(Math.sin(performance.now() * 0.012)) * 0.035;
-  if (antMarker) {
-    const t = performance.now() / 1000;
-    antMarker.position.set(displayedAnt.x, DESK.top, displayedAnt.z);
-    antMarker.getObjectByName('arrow').position.y = 1.3 + Math.sin(t * 4) * 0.15;
-    antMarker.getObjectByName('arrow').rotation.y = t * 2;
-    antMarker.getObjectByName('ring').position.y = 0.03;
-    antMarker.visible = state.status === 'playing';
-  }
-}
-function updateCamera() {
-  if (mine.role === 'robot') {
-    robot.applyTo(camera);
+function updateModels(dt) {
+  // Giant
+  let reach = null, crouch, speed;
+  if (mine.role === 'giant') {
+    shownGiant.set(giant.x, 0, giant.z); shownGiantYaw = giant.yaw;
+    reach = reachTarget; crouch = giant.crouch; speed = giant.speed;
   } else {
-    camera.position.set(antPos.x, DESK.top + 0.32, antPos.z);
-    camera.rotation.set(-0.035, -antPos.angle - Math.PI / 2, 0, 'YXZ');
+    const g = state.giant, before = shownGiant.clone();
+    shownGiant.lerp(new THREE.Vector3(g.x, 0, g.z), Math.min(1, dt * 12));
+    shownGiantYaw = lerpAngle(shownGiantYaw, g.yaw, Math.min(1, dt * 12));
+    speed = Math.min(1, before.distanceTo(shownGiant) / Math.max(dt, 1e-3) / GIANT.walk);
+    reach = g.reach ? new THREE.Vector3(g.reach.x, g.reach.y, g.reach.z) : null;
+    crouch = g.crouch;
   }
+  giantModel.update(dt, { x: shownGiant.x, z: shownGiant.z, yaw: shownGiantYaw, speed, crouch, reach });
+  // Jack: the giant's own fist holds him on the giant's screen
+  const held = Boolean(state.hold);
+  if (mine.role === 'jack' && !held) { shownJack.set(jack.x, jack.y, jack.z); shownJackYaw = jack.yaw; }
+  else {
+    const target = held && mine.role === 'giant' ? giantModel.fist : new THREE.Vector3(state.jack.x, state.jack.y, state.jack.z);
+    shownJack.lerp(target, held && mine.role === 'giant' ? 1 : Math.min(1, dt * 14));
+    shownJackYaw = held ? shownGiantYaw + Math.PI : lerpAngle(shownJackYaw, state.jack.yaw, Math.min(1, dt * 12));
+  }
+  const jackSpeed = mine.role === 'jack' ? jack.speed : state.jack.speed;
+  const air = mine.role === 'jack' ? !jack.grounded : state.jack.air;
+  jackModel.update(dt, { x: shownJack.x, y: shownJack.y, z: shownJack.z, yaw: shownJackYaw, speed: jackSpeed || 0, air, held });
 }
+function localSync() {
+  if (mine.role === 'giant') {
+    const hand = giantModel.handPos, fist = giantModel.fist;
+    const data = {
+      x: giant.x, z: giant.z, yaw: giant.yaw, pitch: giant.pitch, crouch: giant.crouch, grab: grabAsk,
+      reach: reachTarget ? { x: reachTarget.x, y: reachTarget.y, z: reachTarget.z } : null,
+      hand: { x: hand.x, y: hand.y, z: hand.z }, fist: { x: fist.x, y: fist.y, z: fist.z },
+    };
+    grabAsk = false;
+    return { giant: data };
+  }
+  return { jack: { x: jack.x, y: jack.y, z: jack.z, yaw: jack.yaw, speed: jack.speed, air: !jack.grounded, presses } };
+}
+
+// ---- HUD ---------------------------------------------------------------------------------
 function updateHud() {
   if (!state || !mine) return;
-  const robotPlayer = state.players.find((player) => player.role === 'robot');
-  const antPlayer = state.players.find((player) => player.role === 'ant');
-  $('name0').textContent = label(robotPlayer, 'Robot');
-  $('name1').textContent = label(antPlayer, 'Ant');
-  $('score0').textContent = `${state.score[0]} / 3`;
-  $('score1').textContent = state.status === 'waiting' ? 'JOIN TO PLAY' : 'SURVIVE';
+  const giantPlayer = state.players.find((player) => player.role === 'giant');
+  const jackPlayer = state.players.find((player) => player.role === 'jack');
+  $('name0').textContent = label(giantPlayer, 'Giant');
+  $('name1').textContent = label(jackPlayer, 'Jack');
+  const hold = state.hold;
+  $('score0').textContent = hold ? `HOLD ${Math.min(10, hold.held).toFixed(1)}s` : 'SEEK';
+  $('score1').textContent = state.status === 'waiting' ? 'JOIN TO PLAY' : hold ? 'WRIGGLE!' : 'HIDE';
   const seconds = state.timeLeft ?? 180;
   $('clock').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-  $('matchStatus').textContent = state.status === 'playing' ? (mine.role === 'robot' ? 'CATCH THE ANT' : 'DODGE THE GRIPPER') : state.status === 'ended' ? 'MATCH COMPLETE' : 'WAITING FOR ANT PLAYER';
+  $('matchStatus').textContent = state.status === 'playing'
+    ? (hold ? (mine.role === 'giant' ? 'HOLD ON TIGHT' : 'MASH SPACE TO BREAK FREE') : mine.role === 'giant' ? 'FIND AND GRAB JACK' : 'HIDE FROM THE GIANT')
+    : state.status === 'ended' ? 'MATCH COMPLETE' : 'WAITING FOR JACK TO JOIN';
   $('connectionText').textContent = net.connectionLost ? 'CONNECTION LOST' : net.reconnecting ? 'RECONNECTING…' : state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
   $('waiting').classList.toggle('hidden', state.status !== 'waiting');
+  $('lockHint').classList.toggle('hidden', !renderer || locked() || state.status === 'ended');
+  $('holdMeter').classList.toggle('hidden', !hold);
+  if (hold) {
+    $('holdLabel').textContent = `JACK HELD  ${Math.max(0, HOLD_MS / 1000 - hold.held).toFixed(1)}s LEFT`;
+    $('holdBar').style.width = `${Math.min(100, (hold.held * 1000 / HOLD_MS) * 100)}%`;
+    $('struggleBar').style.width = `${Math.min(100, hold.struggle * 100)}%`;
+  }
   if (state.event?.at && state.event.at !== eventAt) {
     eventAt = state.event.at;
-    hint = { caught: `ANT CAUGHT  ${state.event.score}/3`, escape: 'THE ANT ESCAPED', rematch: 'REMATCH  ·  GO!' }[state.event.type] || '';
+    hint = { grabbed: 'JACK GRABBED!', wriggle: 'JACK WRIGGLED FREE', squashed: 'THE GIANT WINS', escape: 'TIME UP · JACK ESCAPED', rematch: 'REMATCH  ·  GO!' }[state.event.type] || '';
     hintUntil = performance.now() + 1800;
     $('toast').textContent = hint;
     $('toast').classList.remove('show'); void $('toast').offsetWidth; $('toast').classList.add('show');
   }
   $('result').classList.toggle('hidden', state.status !== 'ended');
   if (state.status === 'ended') {
+    if (locked()) document.exitPointerLock();
     const won = state.winnerRole === mine.role;
     $('resultTitle').textContent = won ? 'YOU WIN' : 'YOU LOSE';
     $('resultTitle').style.color = won ? 'var(--mint)' : 'var(--coral)';
     const rival = state.players.find((player) => player.id !== mine.id);
-    const outcome = state.winnerRole === 'robot' ? 'Robot caught the ant three times.' : 'The ant survived the full three minutes.';
+    const outcome = state.winnerRole === 'giant' ? 'The giant held Jack for 10 seconds.' : 'Jack stayed free until time ran out.';
     $('resultScore').textContent = outcome + (rival?.rematch && !rematchAsked ? '  Your rival wants a rematch.' : '');
     $('rematchBtn').innerHTML = net.connectionLost ? 'NEW ROOM <span>↗</span>' : rematchAsked ? 'WAITING FOR RIVAL…' : 'REMATCH <span>↗</span>';
   }
   const tip = performance.now() < hintUntil ? hint : null;
-  $('hud').textContent = mine.role === 'robot'
-    ? `${label(mine, 'Robot')}\nMouse aim  ·  Click grab/drop  ·  Space or right-click press  ·  Q/E arm  ·  A/D turn  ·  W/S look\n${tip || 'Drop or slam the mug or laptop onto the red ant.'}`
-    : `${label(mine, 'Ant')}  ·  SPEED ${Math.abs(antSpeed).toFixed(1)}\nW accelerate  ·  S brake/reverse  ·  A/D steer\n${tip || 'Stay clear of falling and slammed objects.'}`;
+  $('hud').textContent = mine.role === 'giant'
+    ? `${label(mine, 'Giant')}${giant.crouch ? '  ·  CROUCHING' : ''}\nMouse look  ·  W/S walk  ·  A/D step  ·  C crouch  ·  Click grab\n${tip || 'Put the crosshair on Jack and click to grab him.'}`
+    : `${label(mine, 'Jack')}\nMouse look  ·  WASD run  ·  Space jump  ·  Held: mash Space\n${tip || 'Hide under furniture, climb the beanstalk, stay out of reach.'}`;
 }
 function acceptState(next) {
   if (!next) return;
-  const newCatch = next.event?.type === 'caught' && next.event.at !== state?.event?.at;
   const newMatch = next.event?.type === 'rematch' && next.event.at !== state?.event?.at;
   if (Number.isFinite(next.clock)) clockOffset = next.clock - Date.now();
   state = next;
-  if (newMatch) startRematch();
-  if (mine?.role === 'ant' && newCatch && state.ant) {
-    antPos = { ...state.ant };
-    antSpeed = 0;
-  }
-}
-// A rematch started: put the desk back the way it was at the start
-function startRematch() {
-  rematchAsked = false;
-  hintUntil = 0;
-  if (mine.role === 'robot') {
-    for (const arm of robot.arms) { arm.held = null; arm.reachFor = null; }
-    for (const [i, item] of items.entries()) { const o = state.objects[i]; item.held = null; item.vy = 0; item.place(o.x, o.y, o.z); }
-  } else {
-    antPos = { ...state.ant };
-    antSpeed = 0;
-  }
-  displayedAnt.set(state.ant.x, DESK.top + 0.03, state.ant.z);
-}
-function syncRemoteObjects() {
-  if (mine.role !== 'ant' || !state?.objects) return;
-  for (const [i, object] of state.objects.entries()) {
-    const item = items[i];
-    if (!item || !object) continue;
-    item.pos.set(object.x, object.y, object.z);
-    item.vy = 0;
-    item.held = object.held ? robot.arms[0] : null;
-    item.sync();
-  }
+  if (newMatch) { rematchAsked = false; hintUntil = 0; resetPositions(); }
 }
 
 async function sendMove() {
   if (moveBusy || state?.status !== 'playing') return;
   moveBusy = true;
-  const payload = { playerId };
-  if (mine.role === 'robot') payload.robot = localRobotSync();
-  else payload.ant = antPos;
-  try { const result = await net.move(payload); acceptState(result.state); updateHud(); }
+  try { const result = await net.move({ playerId, ...localSync() }); acceptState(result.state); }
   catch { $('connectionText').textContent = 'CONNECTION LOST'; }
   finally { moveBusy = false; }
 }
 async function poll() {
   if (pollBusy || !code) return;
   pollBusy = true;
-  try { const result = await net.poll(); acceptState(result.state); updateHud(); }
+  try { const result = await net.poll(); acceptState(result.state); }
   catch { $('connectionText').textContent = 'CONNECTION LOST'; }
   finally { pollBusy = false; }
 }
 function frame(now) {
   if (!active) return;
   const dt = Math.min((now - lastTime) / 1000, 0.05); lastTime = now;
-  if (mine.role === 'robot') {
-    robot.applyTo(camera);
-    if (state.status === 'playing') aimActiveHand();
-    robot.update(dt, keys);
-  } else {
-    stepAnt(dt);
-    applyRemoteRobot();
-    robot.update(dt, new Set());
-    updateCamera();
-  }
-  if (mine.role === 'robot') stepItems(dt, items, room.solidAt);
-  else syncRemoteObjects();
-  colony.step(dt, items, robot.arms.map((arm) => ({ hand: arm.hand, tip: arm.tip })));
-  antView.update();
-  syncAntMesh();
-  if (mine.role === 'ant') updateCamera();
+  if (mine.role === 'giant') stepLocalGiant(dt);
+  else stepLocalJack(dt);
+  updateModels(dt);
+  if (mine.role === 'giant') giantCamera(); else jackCamera();
   // Both players use the host's sky clock, so they see the same time of day
   const skySeconds = state.createdAt ? (Date.now() + clockOffset - state.createdAt) / 1000 : now / 1000;
   const gameHours = hours(skySeconds * (state.daySpeed || 1));

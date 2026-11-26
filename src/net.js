@@ -1,4 +1,4 @@
-// Peer-to-peer connection for Pulse Tag, so the game needs no server of its own and can be
+// Peer-to-peer connection for Jack and the Giant Slayer, so the game needs no server of its own and can be
 // hosted as static files (GitHub Pages). The room creator's browser is the host: it holds the
 // room state (roomlogic.js) and the joining player connects to it directly over WebRTC.
 // PeerJS is used only to find the other player;
@@ -11,7 +11,7 @@ const PREFIX = 'birdy-pulse-tag-';
 const CONNECT_TIMEOUT = 15000;
 const SILENCE_LIMIT = 4000; // no messages for this long = connection lost
 const PING_EVERY = 1000;    // keep-alive, so a player who left is noticed even between matches
-const REJOIN_FOR = 30000;   // how long a dropped ant player keeps trying to get back in
+const REJOIN_FOR = 30000;   // how long a dropped Jack player keeps trying to get back in
 const REJOIN_RETRY = 2000;  // pause between rejoin attempts
 const REJOIN_ATTEMPT = 6000; // one rejoin attempt gives up after this long
 
@@ -44,7 +44,7 @@ export class Net {
     this.isHost = false;
     this.peer = null;
     this.room = null;      // host only
-    this.guest = null;     // host only: the ant player's connection
+    this.guest = null;     // host only: Jack's player's connection
     this.conn = null;      // guest only: connection to the host
     this.latest = null;    // guest only: newest state from the host
     this.lost = false;     // guest only: host connection closed
@@ -55,7 +55,7 @@ export class Net {
     this.gaveUp = false;   // guest only: rejoin failed for good
   }
 
-  // Robot player: create a room and wait for the ant player
+  // Giant player: create a room and wait for Jack's player
   async createRoom(name, daySpeed = 1) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = randomCode();
@@ -80,7 +80,7 @@ export class Net {
     conn.on('data', (msg) => {
       if (conn === this.guest || msg?.type === 'join' || msg?.type === 'rejoin') this.lastHeard = performance.now();
       if (msg?.type === 'rejoin') {
-        // The ant player dropped and came back: give it its slot again on the new connection
+        // Jack's player dropped and came back: give it its slot again on the new connection
         const player = findPlayer(this.room, String(msg.playerId || ''));
         if (!player || player.slot !== 1) { conn.send({ type: 'error', error: 'You are no longer in this room.', final: true }); setTimeout(() => conn.close(), 500); return; }
         player.connected = true;
@@ -112,7 +112,7 @@ export class Net {
     });
   }
 
-  // Ant player: connect to the host's room
+  // Jack's player: connect to the host's room
   async joinRoom(code, name) {
     try { this.peer = await openPeer(); } catch (error) { throw friendly(error); }
     return new Promise((resolve, reject) => {
@@ -201,7 +201,7 @@ export class Net {
     return Boolean(this.conn) && (this.lost || silent);
   }
 
-  // The ant player is trying to get back into the room
+  // Jack's player is trying to get back into the room
   get reconnecting() {
     if (this.isHost) return this.linkDown && performance.now() - this.lastHeard < SILENCE_LIMIT + REJOIN_FOR;
     return this.rejoining || (this.linkDown && !this.gaveUp);

@@ -1,10 +1,19 @@
-// Match rules for Pulse Tag. Runs in the room creator's (robot player's) browser, which acts
-// as the host for both players. No DOM or network here.
+// Match rules for Jack and the Giant Slayer. Runs in the room creator's (giant player's) browser,
+// which acts as the host for both players. No DOM, network or three.js here.
 
-export const MATCH_MS = 180000;
-export const CATCHES_TO_WIN = 3;
-const ANT_START = { x: 35.5, z: 15.5 };
-const ROBOT_EYE = { x: 30.5, y: 15, z: 19.5 };
+export const MATCH_MS = 180000;     // Jack wins by not being held for 10 seconds before time runs out
+export const HOLD_MS = 10000;       // the giant wins by holding Jack this long
+export const STRUGGLE_TO_ESCAPE = 40;
+export const STRUGGLE_DECAY = 2;    // struggle points lost per second
+export const FREE_MS = 2500;        // after wriggling free, Jack cannot be grabbed again for this long
+// How far the giant can grab, measured from its feet: horizontal distance and height
+export const GRAB_RANGE = { side: 12.5, top: 24 };
+// Where Jack can be (the room's interior, voxel units) and how fast he can move
+export const JACK_AREA = { x0: 1.3, x1: 55.7, y0: 1, y1: 28, z0: 1.3, z1: 51.7 };
+const JACK_SPEED = 7, JACK_FALL = 40;
+
+const GIANT_START = { x: 12, z: 42, yaw: 2.2 }; // same as room.js, facing the beanstalk
+const JACK_START = { x: 24.5, y: 9, z: 8 };
 
 export function newId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -15,31 +24,32 @@ export function randomCode() {
   return Math.floor(Math.random() * 0x10000).toString(16).toUpperCase().padStart(4, '0');
 }
 
-const startObjects = () => [
-  { x: 37, y: 9, z: 19.5, w: 4, d: 6, h: 4.4, held: false },
-  { x: 34.5, y: 9, z: 24.5, w: 1.2, d: 1.2, h: 1.6, held: false },
-];
+export function inGrabRange(giant, jack) {
+  return Math.hypot(jack.x - giant.x, jack.z - giant.z) <= GRAB_RANGE.side && jack.y <= GRAB_RANGE.top;
+}
+
+const startGiant = () => ({ ...GIANT_START, pitch: -0.25, crouch: false, reach: null, hand: { x: GIANT_START.x, y: 6, z: GIANT_START.z } });
+const startJack = () => ({ ...JACK_START, yaw: 0, speed: 0, air: false });
 
 // daySpeed: how fast the day/night cycle runs; both players see the host's sky clock
 export function createRoomState(code, name, now = Date.now(), daySpeed = 1) {
-  const player = { id: newId(), name: String(name || 'Robot').slice(0, 16), role: 'robot', color: '#60f5c3', slot: 0, connected: true, rematch: false };
+  const player = { id: newId(), name: String(name || 'Giant').slice(0, 16), role: 'giant', color: '#60f5c3', slot: 0, connected: true, rematch: false };
   return {
-    code, players: [player], score: [0, 0], status: 'waiting', winner: null, winnerRole: null, endAt: 0, createdAt: now, daySpeed,
-    lastCatchAt: 0, antMoveAt: now, event: null,
-    robot: { ...ROBOT_EYE, yaw: -Math.PI / 2, pitch: -0.45, active: 1, pressing: false, hands: [{ x: 35, y: 10, z: 18, tipX: 35, tipY: 9, tipZ: 18 }, { x: 35, y: 10, z: 21, tipX: 35, tipY: 9, tipZ: 21 }] },
-    objects: startObjects(),
-    ant: { ...ANT_START, angle: 0 },
+    code, players: [player], status: 'waiting', winner: null, winnerRole: null, endAt: 0, createdAt: now, daySpeed,
+    jackMoveAt: now, tickAt: now, event: null, hold: null, freeUntil: 0,
+    giant: startGiant(), jack: startJack(),
   };
 }
 
-// Adds the ant player and starts the match. Returns { player } or { error }.
+// Adds Jack's player and starts the match. Returns { player } or { error }.
 export function joinRoomState(room, name, now = Date.now()) {
   if (room.players.length >= 2) return { error: 'This room already has two players.' };
-  const player = { id: newId(), name: String(name || 'Ant').slice(0, 16), role: 'ant', color: '#ff4d6d', slot: 1, connected: true, rematch: false };
+  const player = { id: newId(), name: String(name || 'Jack').slice(0, 16), role: 'jack', color: '#ff4d6d', slot: 1, connected: true, rematch: false };
   room.players.push(player);
   room.status = 'playing';
   room.endAt = now + MATCH_MS;
-  room.antMoveAt = now;
+  room.jackMoveAt = now;
+  room.tickAt = now;
   return { player };
 }
 
@@ -47,54 +57,37 @@ export const findPlayer = (room, id) => room.players.find((p) => p.id === id);
 
 export function clean(room, now = Date.now()) {
   return {
-    code: room.code, status: room.status, score: room.score,
+    code: room.code, status: room.status,
     timeLeft: room.status === 'playing' ? Math.max(0, Math.ceil((room.endAt - now) / 1000)) : MATCH_MS / 1000,
     winner: room.winner, winnerRole: room.winnerRole,
     players: room.players.map((p) => ({ id: p.id, name: p.name, role: p.role, slot: p.slot, color: p.color, connected: p.connected, rematch: p.rematch })),
-    robot: room.robot, ant: room.ant, objects: room.objects, event: room.event,
+    giant: room.giant, jack: room.jack, event: room.event,
+    hold: room.hold ? { held: (now - room.hold.since) / 1000, struggle: room.hold.struggle / STRUGGLE_TO_ESCAPE } : null,
+    free: room.freeUntil > now,
     createdAt: room.createdAt, daySpeed: room.daySpeed, clock: now, // shared sky clock
   };
 }
 
-// Ends the match when time runs out, then returns the shareable state
+function end(room, role, now, type) {
+  room.status = 'ended';
+  room.winnerRole = role;
+  room.winner = room.players[role === 'giant' ? 0 : 1].name;
+  room.hold = null;
+  room.event = { type, at: now };
+}
+
+// Runs the clocks (match time, hold time, struggle), then returns the shareable state
 export function tick(room, now = Date.now()) {
-  if (room.status === 'playing' && now >= room.endAt) {
-    room.status = 'ended';
-    room.winner = room.players[1].name;
-    room.winnerRole = 'ant';
-    room.event = { type: 'escape', at: now };
+  const dt = Math.max(0, (now - (room.tickAt || now)) / 1000);
+  room.tickAt = now;
+  if (room.status === 'playing') {
+    if (room.hold) {
+      room.hold.struggle = Math.max(0, room.hold.struggle - STRUGGLE_DECAY * dt);
+      if (now - room.hold.since >= HOLD_MS) end(room, 'giant', now, 'squashed');
+    }
+    if (room.status === 'playing' && now >= room.endAt) end(room, 'jack', now, 'escape');
   }
   return clean(room, now);
-}
-
-// Desk area the ant can move in
-export const ANT_AREA = { x0: 33.35, x1: 40.65, z0: 13.35, z1: 26.65 };
-const RESPAWN_MIN_DIST = 3;
-
-const underObject = (room, x, z) =>
-  room.objects.some((o) => Math.abs(x - o.x) < o.w / 2 + 0.35 && Math.abs(z - o.z) < o.d / 2 + 0.35);
-
-// After a catch the ant reappears at a random spot on the desk, away from where it was caught
-// and not under an object (so both players can see it)
-export function respawnAnt(room, random = Math.random) {
-  const from = room.ant;
-  let x = from.x, z = from.z;
-  for (let tries = 0; tries < 200; tries++) {
-    x = ANT_AREA.x0 + random() * (ANT_AREA.x1 - ANT_AREA.x0);
-    z = ANT_AREA.z0 + random() * (ANT_AREA.z1 - ANT_AREA.z0);
-    if (Math.hypot(x - from.x, z - from.z) >= RESPAWN_MIN_DIST && !underObject(room, x, z)) break;
-  }
-  room.ant = { x, z, angle: random() * Math.PI * 2 };
-}
-
-function catchAnt(room, now) {
-  room.score[0]++;
-  room.event = { type: 'caught', at: now, score: room.score[0] };
-  if (room.score[0] >= CATCHES_TO_WIN) {
-    room.status = 'ended';
-    room.winner = room.players[0].name;
-    room.winnerRole = 'robot';
-  } else respawnAnt(room);
 }
 
 // After a match, each player asks for a rematch; when both have, the same room starts over
@@ -104,51 +97,68 @@ export function requestRematch(room, player, now = Date.now()) {
   if (room.players.length < 2 || !room.players.every((p) => p.rematch && p.connected)) return;
   for (const p of room.players) p.rematch = false;
   Object.assign(room, {
-    score: [0, 0], status: 'playing', winner: null, winnerRole: null, endAt: now + MATCH_MS, lastCatchAt: 0, antMoveAt: now,
-    objects: startObjects(), ant: { ...ANT_START, angle: 0 }, event: { type: 'rematch', at: now },
+    status: 'playing', winner: null, winnerRole: null, endAt: now + MATCH_MS, jackMoveAt: now, tickAt: now,
+    hold: null, freeUntil: 0, giant: startGiant(), jack: startJack(), event: { type: 'rematch', at: now },
   });
 }
 
 const num = (v) => Number.isFinite(Number(v));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const point = (p) => (p && [p.x, p.y, p.z].every(num) ? { x: Number(p.x), y: Number(p.y), z: Number(p.z) } : null);
 
-// Applies one player's update. The robot reports its arms and objects; the ant reports where it
-// wants to be, and is limited to a believable speed and the desk.
+// Applies one player's update.
+// The giant reports its pose and hand, and asks to grab; the host checks Jack is in reach.
+// Jack reports where he wants to be (limited to a believable speed and the room), or, while held,
+// how many times he has pressed to struggle.
 export function updatePlayer(room, player, data, now = Date.now()) {
   if (!player || room.status !== 'playing') return;
-  if (player.slot === 0 && data.robot && typeof data.robot === 'object') {
-    const { yaw, pitch, active, pressing } = data.robot;
-    if (num(yaw)) room.robot.yaw = Number(yaw);
-    if (num(pitch)) room.robot.pitch = Math.max(-1.25, Math.min(0.6, Number(pitch)));
-    if (num(active)) room.robot.active = Number(active) === 0 ? 0 : 1;
-    room.robot.pressing = Boolean(pressing);
-    if (Array.isArray(data.robot.hands)) room.robot.hands = data.robot.hands.slice(0, 2).map((h, i) => {
-      if (![h?.x, h?.y, h?.z, h?.tipX, h?.tipY, h?.tipZ].every(num)) return room.robot.hands[i];
-      return { x: Number(h.x), y: Number(h.y), z: Number(h.z), tipX: Number(h.tipX), tipY: Number(h.tipY), tipZ: Number(h.tipZ) };
-    });
-    if (Array.isArray(data.robot.objects)) room.objects = data.robot.objects.slice(0, 2).map((o, i) => {
-      if (![o?.x, o?.y, o?.z, o?.w, o?.d, o?.h].every(num)) return room.objects[i];
-      return { x: Number(o.x), y: Number(o.y), z: Number(o.z), w: Number(o.w), d: Number(o.d), h: Number(o.h), held: Boolean(o.held) };
-    });
-    const objectHit = room.objects.some((o) => {
-      const moving = o.held || o.y > 9.08;
-      const overlapsAnt = Math.abs(o.x - room.ant.x) < o.w / 2 + 0.28 && Math.abs(o.z - room.ant.z) < o.d / 2 + 0.28;
-      const overlapsHeight = o.y <= 9.25 && o.y + o.h >= 9.0;
-      return moving && overlapsAnt && overlapsHeight;
-    });
-    if (objectHit && now - room.lastCatchAt > 1100) {
-      room.lastCatchAt = now;
-      catchAnt(room, now);
+  if (player.slot === 0 && data.giant && typeof data.giant === 'object') {
+    const g = data.giant;
+    if (num(g.x)) room.giant.x = clamp(Number(g.x), 1, 56);
+    if (num(g.z)) room.giant.z = clamp(Number(g.z), 1, 52);
+    if (num(g.yaw)) room.giant.yaw = Number(g.yaw);
+    if (num(g.pitch)) room.giant.pitch = clamp(Number(g.pitch), -1.4, 1.2);
+    room.giant.crouch = Boolean(g.crouch);
+    room.giant.reach = point(g.reach);
+    room.giant.hand = point(g.hand) || room.giant.hand;
+    if (g.grab && !room.hold && now >= room.freeUntil && inGrabRange(room.giant, room.jack)) {
+      room.hold = { since: now, struggle: 0, presses: null };
+      room.jack.speed = 0;
+      room.jack.air = false;
+      room.event = { type: 'grabbed', at: now };
     }
-  } else if (player.slot === 1 && data.ant && typeof data.ant === 'object') {
-    const x = Number(data.ant.x), z = Number(data.ant.z), angle = Number(data.ant.angle);
-    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
-    const dt = Math.max(0.02, Math.min(0.35, (now - room.antMoveAt) / 1000));
-    const dx = x - room.ant.x, dz = z - room.ant.z, distance = Math.hypot(dx, dz), limit = 7 * dt + 0.18;
+    // A held Jack goes wherever the giant's fist goes
+    const fist = point(g.fist);
+    if (room.hold && fist) Object.assign(room.jack, { x: fist.x, y: fist.y, z: fist.z });
+  } else if (player.slot === 1 && data.jack && typeof data.jack === 'object') {
+    const j = data.jack;
+    if (room.hold) {
+      const presses = Number(j.presses);
+      if (Number.isFinite(presses)) {
+        const dt = Math.max(0.05, Math.min(1, (now - room.jackMoveAt) / 1000));
+        if (room.hold.presses !== null) room.hold.struggle += clamp(presses - room.hold.presses, 0, 10 * dt + 1);
+        room.hold.presses = presses;
+      }
+      room.jackMoveAt = now;
+      if (room.hold.struggle >= STRUGGLE_TO_ESCAPE) {
+        room.hold = null;
+        room.freeUntil = now + FREE_MS;
+        room.event = { type: 'wriggle', at: now };
+      }
+      return;
+    }
+    if (![j.x, j.y, j.z].every(num)) return;
+    const dt = Math.max(0.02, Math.min(0.35, (now - room.jackMoveAt) / 1000));
+    const dx = Number(j.x) - room.jack.x, dz = Number(j.z) - room.jack.z, dy = Number(j.y) - room.jack.y;
+    const distance = Math.hypot(dx, dz), limit = JACK_SPEED * 1.25 * dt + 0.3;
     const scale = distance > limit ? limit / distance : 1;
-    // The ant moves freely on the desk, including under objects
-    room.ant.x = Math.max(ANT_AREA.x0, Math.min(ANT_AREA.x1, room.ant.x + dx * scale));
-    room.ant.z = Math.max(ANT_AREA.z0, Math.min(ANT_AREA.z1, room.ant.z + dz * scale));
-    if (Number.isFinite(angle)) room.ant.angle = angle;
-    room.antMoveAt = now;
+    const vLimit = JACK_FALL * dt + 0.6;
+    room.jack.x = clamp(room.jack.x + dx * scale, JACK_AREA.x0, JACK_AREA.x1);
+    room.jack.z = clamp(room.jack.z + dz * scale, JACK_AREA.z0, JACK_AREA.z1);
+    room.jack.y = clamp(room.jack.y + clamp(dy, -vLimit, vLimit), JACK_AREA.y0, JACK_AREA.y1);
+    if (num(j.yaw)) room.jack.yaw = Number(j.yaw);
+    room.jack.speed = num(j.speed) ? clamp(Number(j.speed), 0, 1) : 0;
+    room.jack.air = Boolean(j.air);
+    room.jackMoveAt = now;
   }
 }

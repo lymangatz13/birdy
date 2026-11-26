@@ -51,10 +51,10 @@ describe('net', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] }); peers.clear(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('a dropped ant player rejoins the same room and keeps its slot', async () => {
+  it('a dropped Jack player rejoins the same room and keeps its slot', async () => {
     const host = new Net(), guest = new Net();
-    const { state } = await host.createRoom('robo');
-    const joined = await guest.joinRoom(state.code, 'anty');
+    const { state } = await host.createRoom('giant');
+    const joined = await guest.joinRoom(state.code, 'jack');
     expect(host.room.players).toHaveLength(2);
 
     guest.conn.close(); // network blip
@@ -72,15 +72,16 @@ describe('net', () => {
     expect(host.room.players[1].connected).toBe(true);
     expect(host.connectionLost).toBe(false);
 
-    await guest.move({ ant: { x: 36, z: 16, angle: 0 } });
+    const before = host.room.jack.x;
+    await guest.move({ jack: { x: before + 0.1, y: host.room.jack.y, z: host.room.jack.z, yaw: 0 } });
     await settle(50);
-    expect(host.room.ant.x).not.toBe(35.5);
+    expect(host.room.jack.x).not.toBe(before);
   });
 
-  it('the ant player gives up when the host is gone for good', async () => {
+  it('the Jack player gives up when the host is gone for good', async () => {
     const host = new Net(), guest = new Net();
-    const { state } = await host.createRoom('robo');
-    await guest.joinRoom(state.code, 'anty');
+    const { state } = await host.createRoom('giant');
+    await guest.joinRoom(state.code, 'jack');
     host.peer.destroy();
     guest.conn.close();
     await settle(5000);
