@@ -1,4 +1,4 @@
-// Peer-to-peer connection for Pulse Tag, so the game needs no server of its own and can be
+// Peer-to-peer connection for Jack and the Giant Slayer, so the game needs no server of its own and can be
 // hosted as static files (GitHub Pages). The room creator's browser is the host: it holds the
 // room state (roomlogic.js) and the joining player connects to it directly over WebRTC.
 // PeerJS is used only to find the other player;
@@ -41,14 +41,14 @@ export class Net {
     this.isHost = false;
     this.peer = null;
     this.room = null;      // host only
-    this.guest = null;     // host only: the ant player's connection
+    this.guest = null;     // host only: Jack's player's connection
     this.conn = null;      // guest only: connection to the host
     this.latest = null;    // guest only: newest state from the host
     this.lost = false;     // guest only: host connection closed
     this.lastHeard = 0;    // when the other player last sent anything
   }
 
-  // Robot player: create a room and wait for the ant player
+  // Giant player: create a room and wait for Jack's player
   async createRoom(name, daySpeed = 1) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = randomCode();
@@ -94,7 +94,7 @@ export class Net {
     });
   }
 
-  // Ant player: connect to the host's room
+  // Jack's player: connect to the host's room
   async joinRoom(code, name) {
     try { this.peer = await openPeer(); } catch (error) { throw friendly(error); }
     return new Promise((resolve, reject) => {
