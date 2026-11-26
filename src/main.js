@@ -290,7 +290,7 @@ function updateHud() {
   const seconds = state.timeLeft ?? 180;
   $('clock').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   $('matchStatus').textContent = state.status === 'playing' ? (mine.role === 'robot' ? 'CATCH THE ANT' : 'DODGE THE GRIPPER') : state.status === 'ended' ? 'MATCH COMPLETE' : 'WAITING FOR ANT PLAYER';
-  $('connectionText').textContent = net.connectionLost ? 'CONNECTION LOST' : state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
+  $('connectionText').textContent = net.connectionLost ? 'CONNECTION LOST' : net.reconnecting ? 'RECONNECTING…' : state.status === 'playing' ? 'LIVE CHASE' : 'ROOM OPEN';
   $('waiting').classList.toggle('hidden', state.status !== 'waiting');
   if (state.event?.at && state.event.at !== eventAt) {
     eventAt = state.event.at;
