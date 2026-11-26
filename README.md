@@ -4,54 +4,53 @@ Jack and the Giant Slayer is a two-player online game of hide and seek, set in a
 
 Play in the browser: https://lymangatz13.github.io/birdy/
 
-> **Status:** this README describes the game being built now. The version live at the link above may still be the earlier robot-and-ant game until the new version is released.
-
 ## The players
 
-- **Player 1: the Giant.** A large, ugly 3D figure with a head, body, arms and legs. The Giant walks around the room with `W` `A` `S` `D` and reaches out with its arms to grab Jack.
-- **Player 2: Jack.** A tiny stick figure painted red, about 1/10 of the Giant's height. Jack can go anywhere in the room: across the floor, under the bed and the desk, and onto furniture.
+- **Player 1: the Giant.** A big, ugly 3D giant, about 20 voxels (2 m) tall, with a head, body, arms and legs. The Giant walks around the room, crouches to look under furniture, and grabs Jack with one hand.
+- **Player 2: Jack.** A tiny stick figure painted red, about 1/10 of the Giant's height. Jack can go anywhere in the room: across the floor, under the bed, onto furniture and up the leaves of the beanstalk.
 
 ## The room
 
-The game takes place in a 3D bedroom with a sloped attic ceiling, modelled on a real room. Jack can use every piece of furniture to hide:
+The game takes place in a 3D attic bedroom with a sloped ceiling, modelled on a real room. Places to run and hide include:
 
-- a bed with pillows and blankets, a nightstand with a lamp, a printer and a mug
-- a window with blinds and a wall air conditioner, two framed diplomas, a fly swatter and a hanging flower vase
-- a desk with monitors, a laptop and clutter, a black-and-white gaming chair and an electric guitar with an amp
-- a mini fridge, a wooden dresser, a radiator, a laundry basket and a pair of shoes
-- a giant beanstalk growing up through the room
-
-The mug and the laptop from the original desk are still there.
+- a bed raised on legs (with a gap underneath), pillows and a blanket slumped onto the floor, a nightstand with a lamp, a printer, a red cup and a toilet roll, and a black radiator
+- a window with blinds and an air conditioner, two framed diplomas, a bug-zapper racket and a wall vase of flowers
+- a dresser, a mini fridge with a blue light, a desk with drawers and clutter (with the laptop and the mug on it), a white desk with two monitors and an amp, an electric guitar and a gaming chair
+- a bookshelf, a framed picture, a door with a light switch, a rug, a laundry basket, a pair of shoes, a cardboard box and a potted plant
+- a giant beanstalk growing from the middle of the floor up through a hole in the ceiling, with leaves Jack can climb
 
 ## Rules
 
 - **Player 1 is the Giant** (the player who creates the room). **Player 2 is Jack** (the player who joins).
 - A match lasts **3 minutes**.
-- **The Giant wins** by grabbing Jack and **holding Jack for 10 seconds**. If the Giant lets go before 10 seconds, Jack is free again and the hold timer starts over at the next grab.
-- **Jack wins** by not being held for 10 seconds before the clock runs out.
+- **The Giant wins** by grabbing Jack and **holding Jack for 10 seconds**.
+- A grab only works if Jack is the first thing under the Giant's crosshair and within reach (12.5 voxels from the Giant, measured across the floor).
+- While held, Jack can **struggle** by pressing `Space` repeatedly. The struggle meter drains slowly by itself; when it fills, Jack wriggles free, the hold timer resets, and Jack cannot be grabbed again for 2.5 seconds.
+- **Jack wins** if the clock runs out before the Giant has held Jack for 10 seconds.
 - When the match ends, both players can press **REMATCH**. The same room starts a new match once both have pressed it.
 
 ## Controls
 
+Click the room first to lock the mouse, so moving the mouse looks around. Press `Esc` to unlock it.
+
 ### Giant (Player 1)
 
-| Action | Keyboard and mouse |
-| --- | --- |
-| Walk forward / back | `W` / `S` |
-| Turn left / right | `A` / `D` |
-| Aim the active hand | Move the mouse |
-| Grab / let go | Left click |
-| Select left / right arm | `Q` / `E` |
+| Action | Keyboard and mouse | Touch (phones and tablets) |
+| --- | --- | --- |
+| Look around and turn | Move the mouse | Drag on the room |
+| Walk forward / back | `W` / `S` | On-screen arrows |
+| Step left / right | `A` / `D` | On-screen arrows |
+| Crouch | Hold `C` | **CROUCH** button |
+| Grab Jack (under the crosshair) | Left click | Quick tap, or the **GRAB** button |
 
 ### Jack (Player 2)
 
-| Action | Keyboard |
-| --- | --- |
-| Run forward / back | `W` / `S` |
-| Turn left / right | `A` / `D` |
-| Jump (to climb onto furniture) | `Space` |
-
-On phones and tablets, on-screen buttons replace the keys.
+| Action | Keyboard and mouse | Touch (phones and tablets) |
+| --- | --- | --- |
+| Look around | Move the mouse | Drag on the room |
+| Run (relative to the camera) | `W` `A` `S` `D` | On-screen arrows |
+| Jump | `Space` | **JUMP** button |
+| Struggle free while held | Press `Space` repeatedly | Press **JUMP** repeatedly |
 
 ## How to play online
 
@@ -92,12 +91,12 @@ To test online play locally, open the dev server URL in two browser windows: cre
 | --- | --- |
 | `index.html` | Lobby and game screens |
 | `src/main.js` | Rendering, input and the game loop |
-| `src/roomlogic.js` | Match rules: timer, win conditions, rematch (no DOM or network) |
+| `src/roomlogic.js` | Match rules: timer, grab and hold, struggle, rematch (no DOM or network) |
 | `src/net.js` | Peer-to-peer connection with PeerJS |
-| `src/room.js` | The voxel bedroom and desk |
-| `src/robot.js` | Arm movement (being replaced by the Giant) |
-| `src/ants.js` | Background ants |
-| `src/items.js` | The mug and laptop, and how they fall |
+| `src/room.js` | The voxel attic bedroom, its furniture and the beanstalk |
+| `src/giant.js` | The Giant's model and movement |
+| `src/jack.js` | Jack's stick figure and physics |
+| `src/items.js` | The laptop and the mug |
 | `src/sky.js` | Day/night cycle |
 | `src/style.css` | Styles |
 | `tests/` | Vitest tests (`tests/**/*.test.js`) |
