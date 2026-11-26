@@ -8,16 +8,16 @@
   <main id="app">
     <section id="lobby" class="lobby">
       <div class="brand"><span class="brand-mark">J</span><span>JACK AND THE GIANT SLAYER</span><span class="live-dot"></span><span class="live-label">LIVE ARENA</span></div>
-      <div class="hero"><div class="eyebrow">A TWO PLAYER CHASE</div><h1>ROBOT<br><em>VS. ANT</em></h1><p>One player works the robot’s arms. The other is a tiny ant trying to outlast the chase across the desk.</p></div>
+      <div class="hero"><div class="eyebrow">A TWO PLAYER HIDE AND SEEK</div><h1>GIANT<br><em>VS. JACK</em></h1><p>One player is the giant, walking the bedroom to grab Jack. The other is Jack, a tiny red stick figure who runs, hides and dodges anywhere in the room.</p></div>
       <div class="lobby-card">
-        <label for="playerName">YOUR NAME (OPTIONAL)</label><input id="playerName" maxlength="16" placeholder="Robot or Ant" autocomplete="nickname">
+        <label for="playerName">YOUR NAME (OPTIONAL)</label><input id="playerName" maxlength="16" placeholder="Giant or Jack" autocomplete="nickname">
         <button id="createBtn" class="primary">CREATE A ROOM <span>↗</span></button>
         <div class="divider"><span></span>OR JOIN A ROOM<span></span></div>
         <div class="join-row"><input id="roomCode" maxlength="4" placeholder="ROOM CODE" autocomplete="off"><button id="joinBtn" class="secondary">JOIN <span>→</span></button></div>
         <div id="error" class="error"></div>
       </div>
-      <div class="controls-hint"><span>ROBOT</span> MOUSE AIM · CLICK GRAB/DROP · SPACE PRESS · Q/E ARMS · A/D TURN · W/S LOOK <i>·</i> <span>ANT</span> W/S DRIVE · A/D STEER</div>
-      <div class="lobby-footer">JACK AND THE GIANT SLAYER <span>•</span> 3 MINUTES <span>•</span> ROBOT NEEDS 3 CATCHES</div>
+      <div class="controls-hint"><span>GIANT</span> W/S WALK · A/D TURN · MOUSE AIM · CLICK GRAB/LET GO · Q/E ARMS <i>·</i> <span>JACK</span> W/S RUN · A/D TURN · SPACE JUMP</div>
+      <div class="lobby-footer">JACK AND THE GIANT SLAYER <span>•</span> 3 MINUTES <span>•</span> GIANT HOLDS JACK 10 SECONDS TO WIN</div>
     </section>
     <section id="game" class="game hidden">
       <header class="topbar"><div class="brand mini"><span class="brand-mark">J</span><span>JACK AND THE GIANT SLAYER</span></div><div class="room-pill">ROOM <strong id="roomLabel">----</strong><button id="copyCode" title="Copy room link">COPY LINK</button></div><div class="connection"><span id="connectionDot" class="live-dot"></span><span id="connectionText">CONNECTING</span></div></header>
